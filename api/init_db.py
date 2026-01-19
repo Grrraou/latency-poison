@@ -6,10 +6,7 @@ import secrets
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def init_db():
-    # Create database directory if it doesn't exist
-    os.makedirs("/data", exist_ok=True)
-    
-    # Create all tables
+    # Create all tables (MySQL handles its own storage)
     Base.metadata.create_all(bind=engine)
     
     # Create a session

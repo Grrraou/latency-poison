@@ -59,9 +59,9 @@ func NewRepository(db *sql.DB) *Repository {
 func (r *Repository) GetApiKeyByKey(key string) (*ApiKey, error) {
 	apiKey := &ApiKey{}
 	err := r.db.QueryRow(`
-		SELECT id, name, key, is_active, all_collections, request_count, created_at, last_used_at, owner_id
+		SELECT id, name, `+"`key`"+`, is_active, all_collections, request_count, created_at, last_used_at, owner_id
 		FROM api_keys
-		WHERE key = ?
+		WHERE `+"`key`"+` = ?
 	`, key).Scan(
 		&apiKey.ID,
 		&apiKey.Name,

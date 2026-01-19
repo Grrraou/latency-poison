@@ -1,6 +1,36 @@
 version: '3.8'
 
 services:
+  mysql:
+    image: mysql:8.0
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=latencypoison
+      - MYSQL_USER=latencypoison
+      - MYSQL_PASSWORD=latencypoison
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    ports:
+      - "8081:80"
+    environment:
+      - PMA_HOST=mysql
+      - PMA_USER=root
+      - PMA_PASSWORD=rootpassword
+    depends_on:
+      mysql:
+        condition: service_healthy
+
   frontend:
     build:
       context: ./frontend
@@ -24,11 +54,13 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=sqlite:////data/users.db
+      - DATABASE_URL=mysql+pymysql://latencypoison:latencypoison@mysql:3306/latencypoison
       - SECRET_KEY=your-secret-key-here
     volumes:
       - ./api:/app
-      - api_data:/data
+    depends_on:
+      mysql:
+        condition: service_healthy
     command: sh -c "python init_db.py && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
 
   go-proxy:
@@ -38,13 +70,16 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DATABASE_PATH=/data/users.db
+      - DATABASE_HOST=mysql
+      - DATABASE_PORT=3306
+      - DATABASE_USER=latencypoison
+      - DATABASE_PASSWORD=latencypoison
+      - DATABASE_NAME=latencypoison
       - PORT=8080
-    volumes:
-      - api_data:/data
     depends_on:
-      - api
+      mysql:
+        condition: service_healthy
 
 volumes:
   frontend_node_modules:
-  api_data:
+  mysql_data:

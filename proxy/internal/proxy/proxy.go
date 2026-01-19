@@ -106,10 +106,14 @@ func (p *ProxyHandler) injectError(c *fiber.Ctx) error {
 
 // getRandomLatency returns a random latency within the configured range
 func (p *ProxyHandler) getRandomLatency() int {
-	if p.config.MinLatency == p.config.MaxLatency {
+	if p.config.MaxLatency <= p.config.MinLatency {
 		return p.config.MinLatency
 	}
-	return p.config.MinLatency + rand.Intn(p.config.MaxLatency-p.config.MinLatency)
+	diff := p.config.MaxLatency - p.config.MinLatency
+	if diff <= 0 {
+		return p.config.MinLatency
+	}
+	return p.config.MinLatency + rand.Intn(diff)
 }
 
 // ParseFailCodes converts a comma-separated string of error codes to integers

@@ -26,14 +26,14 @@ func main() {
 	}
 	defer logger.Sync()
 
-	// Initialize SQLite connection
-	sqliteClient, err := config.NewSQLiteClient()
+	// Initialize MySQL connection
+	mysqlClient, err := config.NewMySQLClient()
 	if err != nil {
-		logger.Fatal("Failed to connect to SQLite database", zap.Error(err))
+		logger.Fatal("Failed to connect to MySQL database", zap.Error(err))
 	}
-	defer sqliteClient.Close()
+	defer mysqlClient.Close()
 
-	logger.Info("Connected to SQLite database")
+	logger.Info("Connected to MySQL database")
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
@@ -47,8 +47,8 @@ func main() {
 		AllowHeaders: "Origin,Content-Type,Accept,Authorization,X-API-Key",
 	}))
 
-	// Initialize handlers with SQLite database
-	handler := handlers.NewHandler(logger, sqliteClient.GetDB())
+	// Initialize handlers with MySQL database
+	handler := handlers.NewHandler(logger, mysqlClient.GetDB())
 
 	// Register routes
 	// Sandbox endpoint - no auth required, for quick testing

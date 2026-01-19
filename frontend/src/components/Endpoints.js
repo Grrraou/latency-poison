@@ -780,7 +780,11 @@ function Endpoints() {
               <Typography variant="caption">Min Latency: {newEndpoint.min_latency}ms</Typography>
               <Slider
                 value={newEndpoint.min_latency}
-                onChange={(e, v) => setNewEndpoint({ ...newEndpoint, min_latency: v })}
+                onChange={(e, v) => {
+                  const newMin = v;
+                  const newMax = Math.max(v, newEndpoint.max_latency);
+                  setNewEndpoint({ ...newEndpoint, min_latency: newMin, max_latency: newMax });
+                }}
                 min={0} max={5000} step={50}
               />
             </Grid>
@@ -788,7 +792,11 @@ function Endpoints() {
               <Typography variant="caption">Max Latency: {newEndpoint.max_latency}ms</Typography>
               <Slider
                 value={newEndpoint.max_latency}
-                onChange={(e, v) => setNewEndpoint({ ...newEndpoint, max_latency: v })}
+                onChange={(e, v) => {
+                  const newMax = v;
+                  const newMin = Math.min(v, newEndpoint.min_latency);
+                  setNewEndpoint({ ...newEndpoint, min_latency: newMin, max_latency: newMax });
+                }}
                 min={0} max={5000} step={50}
               />
             </Grid>
@@ -858,7 +866,11 @@ function Endpoints() {
                   <Typography variant="caption">Min Latency: {editingEndpoint.min_latency}ms</Typography>
                   <Slider
                     value={editingEndpoint.min_latency}
-                    onChange={(e, v) => setEditingEndpoint({ ...editingEndpoint, min_latency: v })}
+                    onChange={(e, v) => {
+                      const newMin = v;
+                      const newMax = Math.max(v, editingEndpoint.max_latency);
+                      setEditingEndpoint({ ...editingEndpoint, min_latency: newMin, max_latency: newMax });
+                    }}
                     min={0} max={5000} step={50}
                   />
                 </Grid>
@@ -866,7 +878,11 @@ function Endpoints() {
                   <Typography variant="caption">Max Latency: {editingEndpoint.max_latency}ms</Typography>
                   <Slider
                     value={editingEndpoint.max_latency}
-                    onChange={(e, v) => setEditingEndpoint({ ...editingEndpoint, max_latency: v })}
+                    onChange={(e, v) => {
+                      const newMax = v;
+                      const newMin = Math.min(v, editingEndpoint.min_latency);
+                      setEditingEndpoint({ ...editingEndpoint, min_latency: newMin, max_latency: newMax });
+                    }}
                     min={0} max={5000} step={50}
                   />
                 </Grid>

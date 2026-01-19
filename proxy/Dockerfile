@@ -1,10 +1,10 @@
-# Build stage - using standard golang image for CGO support (required by sqlite3)
-FROM golang:1.21 AS builder
+# Build stage
+FROM golang:1.21-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies for SQLite
-RUN apt-get update && apt-get install -y gcc musl-dev
+# Install git for fetching dependencies
+RUN apk add --no-cache git
 
 # Copy go mod file
 COPY go.mod ./
@@ -17,22 +17,19 @@ RUN go get -d -v ./... && \
     go mod download && \
     go mod verify
 
-# Build the application with CGO enabled for SQLite
-RUN CGO_ENABLED=1 GOOS=linux go build -o /app/main ./cmd/server
+# Build the application (CGO disabled - MySQL driver is pure Go)
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/main ./cmd/server
 
 # Final stage
-FROM debian:bookworm-slim
+FROM alpine:latest
 
 WORKDIR /app
 
 # Install necessary runtime dependencies
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apk --no-cache add ca-certificates
 
 # Copy the binary from builder
 COPY --from=builder /app/main /app/
-
-# Create data directory for database
-RUN mkdir -p /data
 
 # Expose port
 EXPOSE 8080

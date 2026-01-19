@@ -5,7 +5,7 @@ High-performance Go proxy server for Latency Poison. Handles request proxying wi
 ## Requirements
 
 - Go 1.21+
-- SQLite (shared database with Python API)
+- MySQL 8.0+ (shared database with Python API)
 
 ## Running Standalone
 
@@ -13,7 +13,11 @@ High-performance Go proxy server for Latency Poison. Handles request proxying wi
 
 ```bash
 # Set environment variables
-export DATABASE_PATH=../api/users.db
+export DATABASE_HOST=localhost
+export DATABASE_PORT=3306
+export DATABASE_USER=latencypoison
+export DATABASE_PASSWORD=latencypoison
+export DATABASE_NAME=latencypoison
 export PORT=8080
 
 # Run
@@ -30,11 +34,14 @@ go build -o bin/latency-poison-proxy ./cmd/server
 # Build
 docker build -t latency-poison-proxy:latest .
 
-# Run (mount the shared database)
+# Run (requires MySQL to be running)
 docker run -p 8080:8080 \
-  -e DATABASE_PATH=/data/users.db \
+  -e DATABASE_HOST=host.docker.internal \
+  -e DATABASE_PORT=3306 \
+  -e DATABASE_USER=latencypoison \
+  -e DATABASE_PASSWORD=latencypoison \
+  -e DATABASE_NAME=latencypoison \
   -e PORT=8080 \
-  -v /path/to/data:/data \
   latency-poison-proxy:latest
 ```
 
@@ -42,7 +49,11 @@ docker run -p 8080:8080 \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_PATH` | `/data/users.db` | Path to SQLite database |
+| `DATABASE_HOST` | `localhost` | MySQL host |
+| `DATABASE_PORT` | `3306` | MySQL port |
+| `DATABASE_USER` | `latencypoison` | MySQL user |
+| `DATABASE_PASSWORD` | `latencypoison` | MySQL password |
+| `DATABASE_NAME` | `latencypoison` | MySQL database name |
 | `PORT` | `8080` | Port to listen on |
 
 ## API Endpoints
@@ -71,7 +82,7 @@ proxy/
 │       └── main.go       # Entry point
 ├── internal/
 │   ├── config/
-│   │   └── sqlite.go     # Database connection
+│   │   └── mysql.go      # Database connection
 │   ├── handlers/
 │   │   └── handlers.go   # HTTP handlers
 │   ├── models/

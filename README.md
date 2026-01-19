@@ -21,6 +21,7 @@ make dev    # Start the development environment
 The application will be available at:
 - Frontend: http://localhost:3000
 - API: http://localhost:8000
+- phpMyAdmin: http://localhost:8081/
 
 ## Development
 

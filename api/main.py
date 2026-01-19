@@ -390,6 +390,13 @@ async def create_endpoint(
     if collection is None:
         raise HTTPException(status_code=404, detail="Collection not found")
     
+    # Validate latency: min_latency must be <= max_latency
+    if endpoint.min_latency > endpoint.max_latency:
+        raise HTTPException(
+            status_code=400, 
+            detail="min_latency cannot be greater than max_latency"
+        )
+    
     db_endpoint = DBEndpoint(**endpoint.dict())
     db.add(db_endpoint)
     db.commit()
@@ -445,6 +452,13 @@ async def update_endpoint(
     for field, value in update_data.items():
         if value is not None:
             setattr(endpoint, field, value)
+    
+    # Validate latency after update: min_latency must be <= max_latency
+    if endpoint.min_latency > endpoint.max_latency:
+        raise HTTPException(
+            status_code=400, 
+            detail="min_latency cannot be greater than max_latency"
+        )
     
     db.commit()
     db.refresh(endpoint)
