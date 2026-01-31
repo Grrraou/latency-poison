@@ -1,4 +1,4 @@
-from database import SessionLocal, User, Base, engine, ConfigApiKey
+from database import SessionLocal, User, Base, engine, ConfigApiKey, UsageLog
 from passlib.context import CryptContext
 from sqlalchemy import text
 import os
@@ -13,7 +13,7 @@ ADMIN_FULL_NAME = os.getenv("ADMIN_FULL_NAME", "Administrator")
 DEFAULT_API_KEY = os.getenv("DEFAULT_API_KEY", "lp_default_admin_key_change_in_production")
 
 def run_migrations(db):
-    """Add config_api_keys columns if missing (e.g. target_url, chaos settings)."""
+    """Add config_api_keys columns if missing; ensure usage_log exists for proxy usage tracking."""
     for col, spec in [
         ("target_url", "TEXT"),
         ("fail_rate", "INT DEFAULT 0"),
@@ -28,6 +28,23 @@ def run_migrations(db):
             print(f"Added column {col} to config_api_keys")
         except Exception:
             db.rollback()
+    # Ensure usage_log exists (proxy writes here for dashboard timeline)
+    try:
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS usage_log (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                config_api_key_id INT NOT NULL,
+                requested_at DATETIME NOT NULL,
+                INDEX (config_api_key_id),
+                INDEX (requested_at),
+                FOREIGN KEY (config_api_key_id) REFERENCES config_api_keys(id) ON DELETE CASCADE
+            )
+        """))
+        db.commit()
+        print("Ensured usage_log table exists")
+    except Exception as e:
+        db.rollback()
+        print("Note: usage_log creation:", e)
     Base.metadata.create_all(bind=engine)
     print("Migrations completed")
 

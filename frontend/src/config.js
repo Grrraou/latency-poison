@@ -9,4 +9,10 @@ export const API_ENDPOINTS = {
   },
   CONFIG_KEYS: `${API_BASE_URL}/api/config-keys`,
   SANDBOX: `${PROXY_API_BASE_URL}/sandbox`,
+  HEALTH: {
+    API: `${API_BASE_URL}/api/health`,
+    PROXY: `${PROXY_API_BASE_URL}/health`,
+  },
+  USAGE_TIMELINE: `${API_BASE_URL}/api/usage/timeline`,
+  USAGE_SUMMARY: `${API_BASE_URL}/api/usage/summary`,
 };

@@ -41,8 +41,17 @@ function Navbar({ user, setUser }) {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
           {user ? (
             <>
+              <Button color="inherit" component={RouterLink} to="/dashboard">
+                Dashboard
+              </Button>
               <Button color="inherit" component={RouterLink} to="/configs">
                 Configs
+              </Button>
+              <Button color="inherit" component={RouterLink} to="/sandbox">
+                Sandbox
+              </Button>
+              <Button color="inherit" component={RouterLink} to="/health">
+                Health
               </Button>
               <Button color="inherit" component={RouterLink} to="/docs">
                 Docs
@@ -55,6 +64,9 @@ function Navbar({ user, setUser }) {
             <>
               <Button color="inherit" component={RouterLink} to="/">
                 Home
+              </Button>
+              <Button color="inherit" component={RouterLink} to="/health">
+                Health
               </Button>
               <Button color="inherit" component={RouterLink} to="/docs">
                 Docs

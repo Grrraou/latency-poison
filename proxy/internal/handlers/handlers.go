@@ -39,6 +39,13 @@ func (h *Handler) SandboxHandler(c *fiber.Ctx) error {
 			"error": "url parameter is required",
 		})
 	}
+	// Only allow http/https to prevent SSRF
+	targetLower := strings.ToLower(targetURL)
+	if !strings.HasPrefix(targetLower, "http://") && !strings.HasPrefix(targetLower, "https://") {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "url must use http or https scheme",
+		})
+	}
 
 	failRate, _ := strconv.ParseFloat(c.Query("failrate", "0"), 64)
 	failCodes, _ := proxy.ParseFailCodes(c.Query("failCodes"))
@@ -86,9 +93,18 @@ func (h *Handler) ConfigKeyProxyHandler(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Internal server error"})
 	}
 
+	// Debug: expose fail_rate so clients can verify (remove in production if desired)
+	c.Set("X-Latency-Poison-Fail-Rate", strconv.Itoa(configKey.FailRate))
+
 	if configKey.TargetURL == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Config key has no target URL. Set target_url in Configs.",
+		})
+	}
+	// Only allow http/https to prevent SSRF via other schemes
+	if !strings.HasPrefix(strings.ToLower(configKey.TargetURL), "http://") && !strings.HasPrefix(strings.ToLower(configKey.TargetURL), "https://") {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "target_url must use http or https scheme",
 		})
 	}
 
@@ -111,6 +127,14 @@ func (h *Handler) ConfigKeyProxyHandler(c *fiber.Ctx) error {
 		})
 	}
 
+	// Record usage for every request (including when we later simulate failure)
+	if err := h.repo.InsertUsage(configKey.ID, time.Now()); err != nil {
+		h.logger.Error("Usage log insert failed (dashboard usage will be empty)", zap.Error(err))
+		c.Set("X-Latency-Poison-Usage-Recorded", "0")
+	} else {
+		c.Set("X-Latency-Poison-Usage-Recorded", "1")
+	}
+
 	// Apply latency
 	if configKey.MinLatency > 0 || configKey.MaxLatency > 0 {
 		latency := configKey.MinLatency
@@ -120,8 +144,8 @@ func (h *Handler) ConfigKeyProxyHandler(c *fiber.Ctx) error {
 		time.Sleep(time.Duration(latency) * time.Millisecond)
 	}
 
-	// Simulate failure
-	if configKey.FailRate > 0 && rand.Intn(100) < configKey.FailRate {
+	// Simulate failure: FailRate is 0–100 from DB, compare as 0–1 like sandbox
+	if configKey.FailRate > 0 && rand.Float64() < (float64(configKey.FailRate)/100.0) {
 		code := 500
 		if len(configKey.ErrorCodes) > 0 {
 			code = configKey.ErrorCodes[rand.Intn(len(configKey.ErrorCodes))]

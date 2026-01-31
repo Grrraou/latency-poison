@@ -75,3 +75,29 @@ export const deleteConfigKey = async (keyId) => {
   });
   return handleResponse(response);
 };
+
+// Health (no auth)
+export const checkApiHealth = async () => {
+  const response = await fetch(API_ENDPOINTS.HEALTH.API, { cache: 'no-store' });
+  const data = await response.json().catch(() => ({}));
+  return { ok: response.ok, status: response.status, data };
+};
+
+export const checkProxyHealth = async () => {
+  const response = await fetch(API_ENDPOINTS.HEALTH.PROXY, { cache: 'no-store' });
+  const data = await response.json().catch(() => ({}));
+  return { ok: response.ok, status: response.status, data };
+};
+
+// Usage timeline (auth required)
+export const fetchUsageTimeline = async (groupBy = 'day', period = '30d') => {
+  const params = new URLSearchParams({ group_by: groupBy, period });
+  const response = await fetch(`${API_ENDPOINTS.USAGE_TIMELINE}?${params}`, { headers: getAuthHeader() });
+  return handleResponse(response);
+};
+
+// Usage summary (total + per key, for debugging empty chart)
+export const fetchUsageSummary = async () => {
+  const response = await fetch(API_ENDPOINTS.USAGE_SUMMARY, { headers: getAuthHeader() });
+  return handleResponse(response);
+};

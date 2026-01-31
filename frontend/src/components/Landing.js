@@ -270,7 +270,7 @@ function Landing() {
             How it works
           </Typography>
           <Typography variant="body1" align="center" color="text.secondary" sx={{ mb: 6 }}>
-            Manage your collections, endpoints, and API keys with an intuitive dashboard
+            Create config keys (one key → one target URL), set chaos, and call the proxy. Try Sandbox with no sign-up.
           </Typography>
           <Grid container spacing={4}>
             <Grid item xs={12} md={6}>
@@ -285,7 +285,7 @@ function Landing() {
               >
                 <img
                   src="/screen1.png"
-                  alt="Endpoints Management"
+                  alt="Configs"
                   style={{ 
                     width: '100%', 
                     height: 'auto', 
@@ -294,10 +294,10 @@ function Landing() {
                 />
                 <Box sx={{ p: 2, bgcolor: 'grey.900' }}>
                   <Typography variant="subtitle1" gutterBottom>
-                    Endpoints Management
+                    Configs
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Configure collections with custom latency and failure rates. Test endpoints directly from the interface.
+                    One config key → one target URL. Set fail rate, latency range, and error codes. Copy your proxy URL and use it in your app.
                   </Typography>
                 </Box>
               </Paper>
@@ -314,7 +314,7 @@ function Landing() {
               >
                 <img
                   src="/screen2.png"
-                  alt="API Keys & Analytics"
+                  alt="Dashboard & Usage"
                   style={{ 
                     width: '100%', 
                     height: 'auto', 
@@ -323,10 +323,10 @@ function Landing() {
                 />
                 <Box sx={{ p: 2, bgcolor: 'grey.900' }}>
                   <Typography variant="subtitle1" gutterBottom>
-                    API Keys & Analytics
+                    Dashboard & Usage
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Generate API keys with granular access control. Track usage and monitor request statistics.
+                    Track requests per config key over time. View usage charts by hour, day, or month.
                   </Typography>
                 </Box>
               </Paper>
@@ -381,8 +381,8 @@ function Landing() {
                   <Typography variant="h6">No Data Storage</Typography>
                 </Box>
                 <Typography variant="body2" color="text.secondary">
-                  We only store your configuration (collections, endpoints, API keys) and aggregate usage 
-                  counters. No request/response data, URLs with parameters, or API payloads are ever stored.
+                  We only store your config keys and aggregate usage counters. No request/response data, 
+                  URLs with parameters, or API payloads are ever stored.
                 </Typography>
               </CardContent>
             </Card>
@@ -430,22 +430,22 @@ function Landing() {
             <Grid item xs={12} sm={6} md={4}>
               <FeatureCard
                 icon={ApiIcon}
-                title="Wildcard Patterns"
-                description="Use patterns like https://api.github.com/* to match multiple endpoints with a single config."
+                title="One Key, One URL"
+                description="Each config key has a single target URL. Call proxy/key/path and traffic is forwarded with chaos applied."
               />
             </Grid>
             <Grid item xs={12} sm={6} md={4}>
               <FeatureCard
                 icon={SecurityIcon}
-                title="API Key Auth"
-                description="Secure access with API keys. Control which collections each key can access."
+                title="Config Keys"
+                description="Create config keys (lp_...) with a target URL and chaos settings. Use the key in the proxy path."
               />
             </Grid>
             <Grid item xs={12} sm={6} md={4}>
               <FeatureCard
                 icon={DashboardIcon}
-                title="Usage Analytics"
-                description="Track requests per collection, endpoint, and API key. Visualize usage with charts."
+                title="Usage by Key"
+                description="Track requests per config key over time. View usage timeline by hour, day, or month."
               />
             </Grid>
             <Grid item xs={12} sm={6} md={4}>
@@ -482,9 +482,9 @@ function Landing() {
               >
                 <Typography variant="h5" sx={{ color: 'background.default', fontWeight: 'bold' }}>1</Typography>
               </Box>
-              <Typography variant="h6" gutterBottom>Create Collections</Typography>
+              <Typography variant="h6" gutterBottom>Create a config key</Typography>
               <Typography variant="body2" color="text.secondary">
-                Organize your API endpoints into collections. Configure latency and failure rates for each endpoint.
+                Sign in, go to Configs, and create a key. Set a target URL (e.g. https://api.github.com) and chaos: fail rate, latency, error codes.
               </Typography>
             </Box>
           </Grid>
@@ -505,9 +505,9 @@ function Landing() {
               >
                 <Typography variant="h5" sx={{ color: 'background.default', fontWeight: 'bold' }}>2</Typography>
               </Box>
-              <Typography variant="h6" gutterBottom>Generate API Keys</Typography>
+              <Typography variant="h6" gutterBottom>Get your proxy URL</Typography>
               <Typography variant="body2" color="text.secondary">
-                Create API keys with access to specific collections. Use them to authenticate proxy requests.
+                Use https://proxy:port/your_key (or /your_key/path). The key identifies the config; path is appended to the target URL.
               </Typography>
             </Box>
           </Grid>
@@ -528,9 +528,9 @@ function Landing() {
               >
                 <Typography variant="h5" sx={{ color: 'background.default', fontWeight: 'bold' }}>3</Typography>
               </Box>
-              <Typography variant="h6" gutterBottom>Route Through Proxy</Typography>
+              <Typography variant="h6" gutterBottom>Call the proxy</Typography>
               <Typography variant="body2" color="text.secondary">
-                Point your app to the proxy URL. Latency and failures are injected automatically based on your config.
+                Point your app at the proxy URL. Latency and failures are applied automatically from your config.
               </Typography>
             </Box>
           </Grid>
@@ -643,4 +643,3 @@ function Landing() {
 }
 
 export default Landing;
-;

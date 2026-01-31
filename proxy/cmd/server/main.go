@@ -34,6 +34,7 @@ func main() {
 	defer mysqlClient.Close()
 
 	logger.Info("Connected to MySQL database")
+	config.EnsureUsageLogTable(mysqlClient.GetDB(), logger)
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{

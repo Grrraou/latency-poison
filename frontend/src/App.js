@@ -11,6 +11,8 @@ import QuickSandbox from './components/QuickSandbox';
 import Landing from './components/Landing';
 import Documentation from './components/Documentation';
 import Configs from './components/Configs';
+import Health from './components/Health';
+import Dashboard from './components/Dashboard';
 import { UserProvider } from './contexts/UserContext';
 
 const theme = createTheme({
@@ -35,7 +37,9 @@ function AppContent({ user, setUser }) {
           <Route path="/login" element={!user ? <Login setUser={setUser} /> : <Navigate to="/configs" />} />
           <Route path="/register" element={!user ? <Register setUser={setUser} /> : <Navigate to="/configs" />} />
           <Route path="/sandbox" element={<QuickSandbox />} />
+          <Route path="/health" element={<Health />} />
           <Route path="/docs" element={<Documentation />} />
+          <Route path="/dashboard" element={<PrivateRoute user={user}><Dashboard /></PrivateRoute>} />
           <Route path="/configs" element={<PrivateRoute user={user}><Configs /></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

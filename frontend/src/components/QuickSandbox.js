@@ -11,8 +11,11 @@ import {
   Grid,
   Tooltip,
   Divider,
+  Chip,
 } from '@mui/material';
 import { API_ENDPOINTS } from '../config';
+
+const DEFAULT_ERROR_CODES = [500, 503];
 
 function QuickSandbox() {
   const [formData, setFormData] = useState({
@@ -20,7 +23,9 @@ function QuickSandbox() {
     failRate: 0,
     minLatency: 0,
     maxLatency: 1000,
+    errorCodes: [...DEFAULT_ERROR_CODES],
   });
+  const [errorCodeInput, setErrorCodeInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -53,6 +58,24 @@ function QuickSandbox() {
     }
   };
 
+  const handleAddErrorCode = () => {
+    const n = parseInt(errorCodeInput, 10);
+    if (isNaN(n) || n < 100 || n > 599) return;
+    if (formData.errorCodes.includes(n)) return;
+    setFormData(f => ({
+      ...f,
+      errorCodes: [...f.errorCodes, n].sort((a, b) => a - b),
+    }));
+    setErrorCodeInput('');
+  };
+
+  const handleRemoveErrorCode = (code) => {
+    setFormData(f => ({
+      ...f,
+      errorCodes: f.errorCodes.filter(c => c !== code),
+    }));
+  };
+
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -63,36 +86,50 @@ function QuickSandbox() {
     try {
       const startTime = performance.now();
       const failRateDecimal = formData.failRate / 100;
-      
-      // Create an AbortController for timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      const params = new URLSearchParams({
+        url: formData.url,
+        failrate: String(failRateDecimal),
+        minLatency: String(formData.minLatency),
+        maxLatency: String(formData.maxLatency),
+      });
+      if (formData.errorCodes.length > 0) {
+        params.set('failCodes', formData.errorCodes.join(','));
+      }
 
-      // Use Go API sandbox endpoint with its parameter naming convention
-      const response = await fetch(
-        `${API_ENDPOINTS.SANDBOX}?url=${encodeURIComponent(formData.url)}&failrate=${failRateDecimal}&minLatency=${formData.minLatency}&maxLatency=${formData.maxLatency}`,
-        {
-          headers: {
-            'Accept': 'application/json',
-          },
-          signal: controller.signal
-        }
-      );
-      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+      const response = await fetch(`${API_ENDPOINTS.SANDBOX}?${params.toString()}`, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+
       clearTimeout(timeoutId);
       const endTime = performance.now();
-      
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+        const text = await response.text();
+        setResult({
+          status: response.status,
+          time: endTime - startTime,
+          simulatedFailure: true,
+          data: { status: response.status, body: text },
+        });
+        return;
       }
-      
-      const data = await response.json();
-      
+
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { _raw: text };
+      }
       setResult({
         status: response.status,
         time: endTime - startTime,
-        data: data,
+        data,
       });
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -195,8 +232,7 @@ function QuickSandbox() {
               Failure Rate
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Simulate random API failures by setting a percentage chance (0-100%) that the request will fail with a 500 error.
-              This helps test your application's error handling and resilience.
+              Chance (0–100%) that the request will fail. When it fails, one of the error codes below is returned at random (same as Configs).
             </Typography>
             <Tooltip title="Probability of the request failing (0-100%)">
               <Box>
@@ -214,6 +250,38 @@ function QuickSandbox() {
                 />
               </Box>
             </Tooltip>
+          </Box>
+
+          <Divider sx={{ my: 3 }} />
+
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              Error codes (when failure is injected)
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              HTTP status codes (100–599) to return when a failure is triggered. One is chosen at random. Same behavior as Configs.
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1 }}>
+              {(formData.errorCodes.length ? formData.errorCodes : []).map((code) => (
+                <Chip
+                  key={code}
+                  label={code}
+                  onDelete={() => handleRemoveErrorCode(code)}
+                  size="small"
+                />
+              ))}
+              <TextField
+                size="small"
+                placeholder="e.g. 502"
+                sx={{ width: 80 }}
+                value={errorCodeInput}
+                onChange={(e) => setErrorCodeInput(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddErrorCode())}
+              />
+              <Button size="small" onClick={handleAddErrorCode}>
+                Add
+              </Button>
+            </Box>
           </Box>
 
           <Button
@@ -241,6 +309,9 @@ function QuickSandbox() {
             <Typography variant="h6" gutterBottom>
               Results
             </Typography>
+            {result.simulatedFailure && (
+              <Alert severity="info" sx={{ mb: 2 }}>Simulated failure — one of your error codes was returned.</Alert>
+            )}
             <Box sx={{ mb: 2 }}>
               <Typography variant="body2" color="text.secondary">
                 Status Code: {result.status}

@@ -50,6 +50,13 @@ class ConfigApiKey(Base):
     owner = relationship("User", back_populates="config_api_keys")
 
 
+class UsageLog(Base):
+    __tablename__ = "usage_log"
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    config_api_key_id = Column(Integer, ForeignKey("config_api_keys.id", ondelete="CASCADE"), index=True)
+    requested_at = Column(DateTime, nullable=False, index=True)
+
+
 Base.metadata.create_all(bind=engine)
 
 

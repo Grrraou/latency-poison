@@ -7,6 +7,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"go.uber.org/zap"
 )
 
 // MySQLClient wraps the MySQL database connection
@@ -80,4 +81,23 @@ func (c *MySQLClient) GetDB() *sql.DB {
 // Close closes the database connection
 func (c *MySQLClient) Close() error {
 	return c.db.Close()
+}
+
+// EnsureUsageLogTable creates usage_log if missing so the proxy can record usage for the dashboard.
+func EnsureUsageLogTable(db *sql.DB, logger *zap.Logger) {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS usage_log (
+			id INT AUTO_INCREMENT PRIMARY KEY,
+			config_api_key_id INT NOT NULL,
+			requested_at DATETIME NOT NULL,
+			INDEX (config_api_key_id),
+			INDEX (requested_at),
+			FOREIGN KEY (config_api_key_id) REFERENCES config_api_keys(id) ON DELETE CASCADE
+		)
+	`)
+	if err != nil {
+		logger.Warn("Could not ensure usage_log table (dashboard usage may be empty)", zap.Error(err))
+		return
+	}
+	logger.Info("Usage logging: usage_log table ready")
 }

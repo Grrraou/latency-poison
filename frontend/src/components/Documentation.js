@@ -77,7 +77,6 @@ const sections = [
   { id: 'config-setup', title: 'Config Setup', icon: DashboardIcon },
   { id: 'api-reference', title: 'API Reference', icon: CodeIcon },
   { id: 'examples', title: 'Examples', icon: SettingsIcon },
-  { id: 'mitm-proxy', title: 'MITM Proxy (Browser)', icon: SecurityIcon },
   { id: 'security', title: 'Security', icon: SecurityIcon },
 ];
 
@@ -85,7 +84,6 @@ function Documentation() {
   const proxyBaseUrl = PROXY_API_BASE_URL || 'http://localhost:8080';
   const location = useLocation();
   const displayApiKey = 'lp_your_key_from_configs_page';
-  const mitmProxyUrl = (proxyBaseUrl && typeof window !== 'undefined') ? new URL(proxyBaseUrl).hostname + ':9090' : 'localhost:9090';
 
   // Scroll to section if hash is present
   React.useEffect(() => {
@@ -381,11 +379,11 @@ volumes:
                   <TableBody>
                     <TableRow>
                       <TableCell><strong>HTTP Proxy</strong></TableCell>
-                      <TableCell><code>{mitmProxyUrl}</code></TableCell>
+                      <TableCell><code>localhost:9090</code></TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell><strong>HTTPS Proxy</strong></TableCell>
-                      <TableCell><code>{mitmProxyUrl}</code></TableCell>
+                      <TableCell><code>localhost:9090</code></TableCell>
                     </TableRow>
                   </TableBody>
                 </Table>
