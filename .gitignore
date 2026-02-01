@@ -21,6 +21,7 @@ wheels/
 *.egg
 MANIFEST
 .env
+.env.prod
 !.env.example
 .venv
 env/

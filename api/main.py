@@ -668,14 +668,7 @@ async def create_checkout(
 
 
 class UpgradeRequest(BaseModel):
-    to_plan: str = Field(default="pro", min_length=1, max_length=32)
-
-    @field_validator("to_plan")
-    @classmethod
-    def to_plan_only_pro(cls, v: str) -> str:
-        if (v or "").lower() != "pro":
-            raise ValueError("Only upgrade to Pro is supported")
-        return "pro"
+    to_plan: str = "pro"  # only "pro" supported for now
 
 
 @app.post("/api/billing/upgrade")
@@ -687,13 +680,13 @@ async def upgrade_subscription(
     """Upgrade from Starter to Pro: update Stripe subscription to Pro price, then update DB."""
     if STRIPE_SECRET_KEY == "localhost" or not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Stripe not configured")
+    if (body.to_plan or "").lower() != "pro":
+        raise HTTPException(status_code=400, detail="Only upgrade to Pro is supported")
     if not STRIPE_PRO_PRICE_ID:
         raise HTTPException(status_code=503, detail="Pro price not configured")
     sub_id = getattr(current_user, "stripe_subscription_id", None)
     if not sub_id:
         raise HTTPException(status_code=400, detail="No active subscription")
-    plan = get_effective_plan(current_user)
-    if plan == "pro":
         return {"plan": "pro", "message": "Already on Pro"}
     if plan != "starter":
         raise HTTPException(status_code=400, detail="Upgrade only from Starter to Pro")
@@ -742,6 +735,13 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     client = stripe.StripeClient(STRIPE_SECRET_KEY)
     try:
         event = client.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if event["type"] == "customer.subscription.created" or event["type"] == "customer.subscription.updated":
+        sub = event["data"]["object"]
+        sub_id = sub["id"]
+        customer_id = sub.get("customer")
+        status = sub.get("status", "")
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid webhook signature")
     if event["type"] == "customer.subscription.created" or event["type"] == "customer.subscription.updated":
@@ -756,13 +756,6 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             if data:
                 price_obj = data[0].get("price")
                 price_id = (price_obj.get("id") if isinstance(price_obj, dict) else price_obj) or ""
-            plan = "pro" if price_id == STRIPE_PRO_PRICE_ID else "starter"
-            user = db.query(DBUser).filter(DBUser.stripe_customer_id == customer_id).first()
-            if user:
-                user.stripe_subscription_id = sub_id
-                user.plan = plan
-                db.commit()
-    elif event["type"] == "customer.subscription.deleted":
         sub = event["data"]["object"]
         user = db.query(DBUser).filter(DBUser.stripe_subscription_id == sub["id"]).first()
         if user:
