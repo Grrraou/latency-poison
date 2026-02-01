@@ -21,6 +21,7 @@ export const API_ENDPOINTS = {
   BILLING: {
     PLANS: `${API_BASE_URL}/api/billing/plans`,
     USAGE: `${API_BASE_URL}/api/billing/usage`,
+    INVOICES: `${API_BASE_URL}/api/billing/invoices`,
     SYNC: `${API_BASE_URL}/api/billing/sync`,
     CHECKOUT: `${API_BASE_URL}/api/billing/checkout`,
     PORTAL: `${API_BASE_URL}/api/billing/portal`,

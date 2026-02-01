@@ -33,6 +33,12 @@ def run_migrations(db):
         ("trial_ends_at", "DATETIME NULL"),
         ("stripe_customer_id", "VARCHAR(255) NULL"),
         ("stripe_subscription_id", "VARCHAR(255) NULL"),
+        ("billing_company", "VARCHAR(255) NULL"),
+        ("billing_address_line1", "VARCHAR(255) NULL"),
+        ("billing_address_line2", "VARCHAR(255) NULL"),
+        ("billing_postal_code", "VARCHAR(32) NULL"),
+        ("billing_city", "VARCHAR(255) NULL"),
+        ("billing_country", "VARCHAR(2) NULL"),
     ]:
         try:
             db.execute(text(f"ALTER TABLE users ADD COLUMN {col} {spec}"))

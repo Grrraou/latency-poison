@@ -77,6 +77,13 @@ class UserMe(BaseModel):
     plan: str = "free"
     trial_ends_at: Optional[datetime] = None
     has_active_subscription: bool = False
+    # Invoicing address (required for invoices under French law)
+    billing_company: Optional[str] = None
+    billing_address_line1: Optional[str] = None
+    billing_address_line2: Optional[str] = None
+    billing_postal_code: Optional[str] = None
+    billing_city: Optional[str] = None
+    billing_country: Optional[str] = None
 
 
 class UserCreate(BaseModel):
@@ -109,6 +116,13 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = Field(None, max_length=255)
     current_password: Optional[str] = None
     new_password: Optional[str] = Field(None, min_length=8, max_length=128)
+    # Invoicing address (required for invoices under French law)
+    billing_company: Optional[str] = Field(None, max_length=255)
+    billing_address_line1: Optional[str] = Field(None, max_length=255)
+    billing_address_line2: Optional[str] = Field(None, max_length=255)
+    billing_postal_code: Optional[str] = Field(None, max_length=32)
+    billing_city: Optional[str] = Field(None, max_length=255)
+    billing_country: Optional[str] = Field(None, max_length=2)
 
     @field_validator("username")
     @classmethod
@@ -129,6 +143,27 @@ class UserUpdate(BaseModel):
         if "@" not in v or len(v) > 255:
             raise ValueError("Invalid email")
         return v.lower()
+
+
+def _user_has_invoicing_address(user) -> bool:
+    """Check if user has minimum invoicing address (required for French law)."""
+    line1 = (getattr(user, "billing_address_line1", None) or "").strip()
+    postal = (getattr(user, "billing_postal_code", None) or "").strip()
+    city = (getattr(user, "billing_city", None) or "").strip()
+    country = (getattr(user, "billing_country", None) or "").strip().upper()
+    return bool(line1 and postal and city and country and len(country) == 2)
+
+
+def _stripe_address_from_user(user) -> dict:
+    """Build Stripe Customer address dict from user billing fields."""
+    return {
+        "line1": (getattr(user, "billing_address_line1", None) or "").strip() or None,
+        "line2": (getattr(user, "billing_address_line2", None) or "").strip() or None,
+        "postal_code": (getattr(user, "billing_postal_code", None) or "").strip() or None,
+        "city": (getattr(user, "billing_city", None) or "").strip() or None,
+        "country": (getattr(user, "billing_country", None) or "").strip().upper() or None,
+    }
+
 
 # Config API Key (one key -> one target URL + chaos)
 def _validate_http_https(url: Optional[str]) -> Optional[str]:
@@ -321,6 +356,12 @@ async def read_users_me(db: Session = Depends(get_db), current_user: DBUser = De
         plan=plan,
         trial_ends_at=getattr(current_user, "trial_ends_at", None),
         has_active_subscription=has_sub,
+        billing_company=getattr(current_user, "billing_company", None),
+        billing_address_line1=getattr(current_user, "billing_address_line1", None),
+        billing_address_line2=getattr(current_user, "billing_address_line2", None),
+        billing_postal_code=getattr(current_user, "billing_postal_code", None),
+        billing_city=getattr(current_user, "billing_city", None),
+        billing_country=getattr(current_user, "billing_country", None),
     )
 
 
@@ -349,8 +390,31 @@ async def update_users_me(
         if not verify_password(body.current_password, current_user.hashed_password):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
         current_user.hashed_password = pwd_context.hash(body.new_password)
+    # Invoicing address (required for invoices under French law)
+    if body.billing_company is not None:
+        current_user.billing_company = body.billing_company.strip() or None
+    if body.billing_address_line1 is not None:
+        current_user.billing_address_line1 = body.billing_address_line1.strip() or None
+    if body.billing_address_line2 is not None:
+        current_user.billing_address_line2 = body.billing_address_line2.strip() or None
+    if body.billing_postal_code is not None:
+        current_user.billing_postal_code = body.billing_postal_code.strip() or None
+    if body.billing_city is not None:
+        current_user.billing_city = body.billing_city.strip() or None
+    if body.billing_country is not None:
+        current_user.billing_country = (body.billing_country.strip() or "").upper() or None
     db.commit()
     db.refresh(current_user)
+    # Sync invoicing address to Stripe so invoices show it (French law)
+    cid = getattr(current_user, "stripe_customer_id", None)
+    if cid and STRIPE_SECRET_KEY and STRIPE_SECRET_KEY != "localhost":
+        addr = _stripe_address_from_user(current_user)
+        if any(addr.values()):
+            try:
+                client = stripe.StripeClient(STRIPE_SECRET_KEY)
+                client.customers.update(cid, params={"address": addr})
+            except stripe.StripeError:
+                pass
     plan = get_effective_plan(current_user)
     has_sub = bool(getattr(current_user, "stripe_subscription_id", None))
     return UserMe(
@@ -361,6 +425,12 @@ async def update_users_me(
         plan=plan,
         trial_ends_at=getattr(current_user, "trial_ends_at", None),
         has_active_subscription=has_sub,
+        billing_company=getattr(current_user, "billing_company", None),
+        billing_address_line1=getattr(current_user, "billing_address_line1", None),
+        billing_address_line2=getattr(current_user, "billing_address_line2", None),
+        billing_postal_code=getattr(current_user, "billing_postal_code", None),
+        billing_city=getattr(current_user, "billing_city", None),
+        billing_country=getattr(current_user, "billing_country", None),
     )
 
 
@@ -585,6 +655,43 @@ async def billing_usage(db: Session = Depends(get_db), current_user: DBUser = De
     }
 
 
+@app.get("/api/billing/invoices")
+async def billing_invoices(
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user),
+):
+    """List Stripe invoices for the current user. Stripe creates these automatically for subscriptions."""
+    cid = getattr(current_user, "stripe_customer_id", None)
+    if not cid or STRIPE_SECRET_KEY == "localhost" or not STRIPE_SECRET_KEY:
+        return {"invoices": []}
+    try:
+        client = stripe.StripeClient(STRIPE_SECRET_KEY)
+        resp = client.invoices.list(params={"customer": cid, "limit": 50})
+        invoices = []
+        for inv in (resp.data or []):
+            amount = getattr(inv, "amount_paid", None) or getattr(inv, "amount_due", None) or 0
+            currency = (getattr(inv, "currency", None) or "eur").upper()
+            created = getattr(inv, "created", None)
+            if isinstance(created, (int, float)):
+                created = datetime.utcfromtimestamp(created).isoformat() + "Z"
+            invoices.append({
+                "id": getattr(inv, "id", None),
+                "number": getattr(inv, "number", None),
+                "status": getattr(inv, "status", None),
+                "amount_due": getattr(inv, "amount_due", 0),
+                "amount_paid": getattr(inv, "amount_paid", 0),
+                "currency": currency,
+                "created": created,
+                "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None),
+                "invoice_pdf": getattr(inv, "invoice_pdf", None),
+            })
+        return {"invoices": invoices}
+    except stripe.StripeError:
+        return {"invoices": []}
+    except Exception:
+        return {"invoices": []}
+
+
 # Usage timeline (aggregated by hour/day/month)
 @app.get("/api/usage/timeline")
 async def usage_timeline(
@@ -707,6 +814,12 @@ async def create_checkout(
 ):
     if STRIPE_SECRET_KEY == "localhost" or not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Stripe not configured; use donation in localhost mode")
+    # Invoices require an invoicing address under French law
+    if not _user_has_invoicing_address(current_user):
+        raise HTTPException(
+            status_code=400,
+            detail="Please set your invoicing address in Profile or Billing before subscribing. Invoices require a full billing address (address, postal code, city, country) under French law.",
+        )
     allowed = _allowed_checkout_price_ids()
     if not allowed or body.price_id not in allowed:
         raise HTTPException(
@@ -714,11 +827,21 @@ async def create_checkout(
             detail="Invalid or unsupported plan. Use one of the subscription options shown.",
         )
     client = stripe.StripeClient(STRIPE_SECRET_KEY)
+    addr = _stripe_address_from_user(current_user)
     if getattr(current_user, "stripe_customer_id", None):
         customer_id = current_user.stripe_customer_id
+        # Ensure Stripe customer has current invoicing address for invoices
+        try:
+            client.customers.update(customer_id, params={"address": addr})
+        except stripe.StripeError:
+            pass
     else:
         customer = client.customers.create(
-            params={"email": current_user.email or "", "metadata": {"user_id": str(current_user.id)}}
+            params={
+                "email": current_user.email or "",
+                "metadata": {"user_id": str(current_user.id)},
+                "address": addr,
+            }
         )
         customer_id = customer.id
         current_user.stripe_customer_id = customer_id
@@ -756,7 +879,7 @@ async def upgrade_subscription(
     sub_id = getattr(current_user, "stripe_subscription_id", None)
     if not sub_id:
         raise HTTPException(status_code=400, detail="No active subscription")
-        return {"plan": "pro", "message": "Already on Pro"}
+    plan = get_effective_plan(current_user)
     if plan != "starter":
         raise HTTPException(status_code=400, detail="Upgrade only from Starter to Pro")
     client = stripe.StripeClient(STRIPE_SECRET_KEY)

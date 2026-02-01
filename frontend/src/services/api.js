@@ -127,6 +127,11 @@ export const fetchBillingUsage = async () => {
   return handleResponse(response);
 };
 
+export const fetchBillingInvoices = async () => {
+  const response = await fetch(API_ENDPOINTS.BILLING.INVOICES, { headers: getAuthHeader() });
+  return handleResponse(response);
+};
+
 export const syncBillingFromStripe = async () => {
   const response = await fetch(API_ENDPOINTS.BILLING.SYNC, {
     method: 'POST',
