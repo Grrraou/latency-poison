@@ -19,6 +19,9 @@ FRONTEND_PORT ?= 3000
 PHPMYADMIN_PORT ?= 8081
 DEFAULT_API_KEY ?= lp_default_admin_key_change_in_production
 
+# Docker Compose: use "docker compose" (V2 plugin) or "docker-compose" (legacy)
+DOCKER_COMPOSE ?= docker compose
+
 # =============================================================================
 # SETUP
 # =============================================================================
@@ -36,7 +39,7 @@ init:
 
 # Initialize database (create tables + fixtures). Runs inside API container when using make dev; use this for local DB.
 init-db:
-	docker-compose run --rm api python init_db.py
+	$(DOCKER_COMPOSE) run --rm api python init_db.py
 
 # =============================================================================
 # FULL STACK (Docker Compose)
@@ -44,33 +47,46 @@ init-db:
 
 # Start all services with Docker Compose
 dev:
-	docker-compose up
+	$(DOCKER_COMPOSE) up
 
 # Start all services in background
 dev-bg:
-	docker-compose up -d
+	$(DOCKER_COMPOSE) up -d
 
-# Build all Docker images
+# Build all Docker images (run from project root where docker-compose.yml is)
 build:
-	docker-compose build
+	$(DOCKER_COMPOSE) -f docker-compose.yml build
+
+# Production (VPS + Apache): use .env.prod, bind API/proxy to localhost only
+COMPOSE_PROD = -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.prod
+build-prod:
+	$(DOCKER_COMPOSE) $(COMPOSE_PROD) build
+up-prod:
+	$(DOCKER_COMPOSE) $(COMPOSE_PROD) up -d mysql api go-proxy
+init-db-prod:
+	$(DOCKER_COMPOSE) $(COMPOSE_PROD) run --rm api python init_db.py
+stop-prod:
+	$(DOCKER_COMPOSE) $(COMPOSE_PROD) down
+logs-prod:
+	$(DOCKER_COMPOSE) $(COMPOSE_PROD) logs -f
 
 # Clean up containers and volumes
 clean:
-	docker-compose down -v
-	docker-compose rm -f
+	$(DOCKER_COMPOSE) down -v
+	$(DOCKER_COMPOSE) rm -f
 
 # View logs
 logs:
-	docker-compose logs -f
+	$(DOCKER_COMPOSE) logs -f
 
 # Stop all services
 stop:
-	docker-compose down
+	$(DOCKER_COMPOSE) down
 
 # Restart all services
 restart:
-	docker-compose down
-	docker-compose up -d
+	$(DOCKER_COMPOSE) down
+	$(DOCKER_COMPOSE) up -d
 
 # =============================================================================
 # STRIPE WEBHOOK (local dev with Docker)
@@ -79,14 +95,14 @@ restart:
 # First time: make stripe-login (browser auth), then make stripe-listen.
 # 1. make stripe-listen
 # 2. Copy the "whsec_..." signing secret into .env as STRIPE_WEBHOOK_SECRET
-# 3. docker-compose restart api
+# 3. $(DOCKER_COMPOSE) restart api
 stripe-listen:
-	@echo "Forwarding Stripe webhooks to API container (api:8000). Copy whsec_... into .env as STRIPE_WEBHOOK_SECRET, then: docker-compose restart api"
-	docker-compose --profile tools run --rm stripe-cli listen --forward-to http://api:8000/api/billing/webhook
+	@echo "Forwarding Stripe webhooks to API container (api:8000). Copy whsec_... into .env as STRIPE_WEBHOOK_SECRET, then: $(DOCKER_COMPOSE) restart api"
+	$(DOCKER_COMPOSE) --profile tools run --rm stripe-cli listen --forward-to http://api:8000/api/billing/webhook
 
 # One-time: log in Stripe CLI in Docker (opens browser)
 stripe-login:
-	docker-compose --profile tools run --rm stripe-cli login
+	$(DOCKER_COMPOSE) --profile tools run --rm stripe-cli login
 
 # =============================================================================
 # CONFIG PROXY (main feature)
@@ -110,23 +126,23 @@ config-proxy-call:
 
 # Start MySQL only
 mysql:
-	docker-compose up -d mysql phpmyadmin
+	$(DOCKER_COMPOSE) up -d mysql phpmyadmin
 
 # Connect to MySQL CLI
 mysql-cli:
-	docker-compose exec mysql mysql -u $(DATABASE_USER) -p$(DATABASE_PASSWORD) $(DATABASE_NAME)
+	$(DOCKER_COMPOSE) exec mysql mysql -u $(DATABASE_USER) -p$(DATABASE_PASSWORD) $(DATABASE_NAME)
 
 # MySQL root CLI
 mysql-root:
-	docker-compose exec mysql mysql -u root -p$(MYSQL_ROOT_PASSWORD)
+	$(DOCKER_COMPOSE) exec mysql mysql -u root -p$(MYSQL_ROOT_PASSWORD)
 
 # Reset database (removes all data)
 mysql-reset:
-	docker-compose down -v mysql
-	docker-compose up -d mysql
+	$(DOCKER_COMPOSE) down -v mysql
+	$(DOCKER_COMPOSE) up -d mysql
 	@echo "Waiting for MySQL to be ready..."
 	@sleep 10
-	docker-compose up -d api
+	$(DOCKER_COMPOSE) up -d api
 
 # =============================================================================
 # INDIVIDUAL SERVICES
@@ -177,7 +193,7 @@ docker-proxy:
 # =============================================================================
 
 test:
-	docker-compose run --rm api pytest
+	$(DOCKER_COMPOSE) run --rm api pytest
 
 test-proxy:
 	cd proxy && go test -v ./...
