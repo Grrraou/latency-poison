@@ -476,8 +476,10 @@ async def billing_sync(db: Session = Depends(get_db), current_user: DBUser = Dep
                 continue
             sub = subs.data[0]
             price_id = ""
-            if sub.items and sub.items.data:
-                price_id = getattr(sub.items.data[0].price, "id", None) or ""
+            items_resp = client.subscription_items.list(params={"subscription": sub.id})
+            if items_resp.data:
+                price_obj = getattr(items_resp.data[0], "price", None)
+                price_id = getattr(price_obj, "id", None) or ""
             plan = "pro" if price_id == STRIPE_PRO_PRICE_ID else "starter"
             current_user.stripe_subscription_id = sub.id
             current_user.plan = plan
@@ -488,8 +490,10 @@ async def billing_sync(db: Session = Depends(get_db), current_user: DBUser = Dep
         current_user.plan = "free"
         db.commit()
         db.refresh(current_user)
+    except stripe.StripeError:
+        return {"plan": get_effective_plan(current_user), "synced": False}
     except Exception:
-        pass
+        return {"plan": get_effective_plan(current_user), "synced": False}
     return {"plan": get_effective_plan(current_user), "synced": True}
 
 
@@ -606,7 +610,24 @@ async def start_trial(db: Session = Depends(get_db), current_user: DBUser = Depe
 
 
 class CheckoutRequest(BaseModel):
-    price_id: str
+    price_id: str = Field(..., min_length=1, max_length=255)
+
+    @field_validator("price_id")
+    @classmethod
+    def price_id_format(cls, v: str) -> str:
+        if not v or not v.startswith("price_"):
+            raise ValueError("Use a Stripe Price ID (starts with price_)")
+        if not re.match(r"^price_[a-zA-Z0-9_]+$", v):
+            raise ValueError("Invalid price ID format")
+        return v.strip()
+
+
+# Allowed Stripe price IDs for checkout (prevents arbitrary product checkout)
+def _allowed_checkout_price_ids() -> tuple:
+    return tuple(
+        x for x in (STRIPE_STARTER_PRICE_ID, STRIPE_PRO_PRICE_ID)
+        if x and x.startswith("price_")
+    )
 
 
 @app.post("/api/billing/checkout")
@@ -617,10 +638,11 @@ async def create_checkout(
 ):
     if STRIPE_SECRET_KEY == "localhost" or not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Stripe not configured; use donation in localhost mode")
-    if (body.price_id or "").startswith("prod_"):
+    allowed = _allowed_checkout_price_ids()
+    if not allowed or body.price_id not in allowed:
         raise HTTPException(
             status_code=400,
-            detail="Use the Price ID (starts with price_), not the Product ID (prod_). In Stripe: Product → Tarifs → click the price (e.g. 12 €/mois) → copy the Price ID.",
+            detail="Invalid or unsupported plan. Use one of the subscription options shown.",
         )
     client = stripe.StripeClient(STRIPE_SECRET_KEY)
     if getattr(current_user, "stripe_customer_id", None):
@@ -646,7 +668,14 @@ async def create_checkout(
 
 
 class UpgradeRequest(BaseModel):
-    to_plan: str = "pro"  # only "pro" supported for now
+    to_plan: str = Field(default="pro", min_length=1, max_length=32)
+
+    @field_validator("to_plan")
+    @classmethod
+    def to_plan_only_pro(cls, v: str) -> str:
+        if (v or "").lower() != "pro":
+            raise ValueError("Only upgrade to Pro is supported")
+        return "pro"
 
 
 @app.post("/api/billing/upgrade")
@@ -658,8 +687,6 @@ async def upgrade_subscription(
     """Upgrade from Starter to Pro: update Stripe subscription to Pro price, then update DB."""
     if STRIPE_SECRET_KEY == "localhost" or not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Stripe not configured")
-    if (body.to_plan or "").lower() != "pro":
-        raise HTTPException(status_code=400, detail="Only upgrade to Pro is supported")
     if not STRIPE_PRO_PRICE_ID:
         raise HTTPException(status_code=503, detail="Pro price not configured")
     sub_id = getattr(current_user, "stripe_subscription_id", None)
@@ -715,8 +742,8 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     client = stripe.StripeClient(STRIPE_SECRET_KEY)
     try:
         event = client.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
     if event["type"] == "customer.subscription.created" or event["type"] == "customer.subscription.updated":
         sub = event["data"]["object"]
         sub_id = sub["id"]
@@ -725,7 +752,10 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         if status in ("active", "trialing"):
             items = sub.get("items") or {}
             data = items.get("data") or []
-            price_id = (data[0].get("price") or {}).get("id") or "" if data else ""
+            price_id = ""
+            if data:
+                price_obj = data[0].get("price")
+                price_id = (price_obj.get("id") if isinstance(price_obj, dict) else price_obj) or ""
             plan = "pro" if price_id == STRIPE_PRO_PRICE_ID else "starter"
             user = db.query(DBUser).filter(DBUser.stripe_customer_id == customer_id).first()
             if user:
