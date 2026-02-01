@@ -1,0 +1,25 @@
+# Production: API + proxy + frontend in Docker, bind to localhost. Apache proxies to them.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.prod up -d mysql api go-proxy frontend
+
+services:
+  api:
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+
+  go-proxy:
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        - REACT_APP_API_BASE_URL=${REACT_APP_API_BASE_URL}
+        - REACT_APP_PROXY_API_BASE_URL=${REACT_APP_PROXY_API_BASE_URL}
+        - REACT_APP_STRIPE_PUBLISHABLE_KEY=${REACT_APP_STRIPE_PUBLISHABLE_KEY}
+        - REACT_APP_STRIPE_DONATION_LINK=${REACT_APP_STRIPE_DONATION_LINK:-}
+    ports:
+      - "127.0.0.1:3000:80"
+    # No volumes in prod; serve built static files from image

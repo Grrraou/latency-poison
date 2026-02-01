@@ -735,13 +735,6 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     client = stripe.StripeClient(STRIPE_SECRET_KEY)
     try:
         event = client.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    if event["type"] == "customer.subscription.created" or event["type"] == "customer.subscription.updated":
-        sub = event["data"]["object"]
-        sub_id = sub["id"]
-        customer_id = sub.get("customer")
-        status = sub.get("status", "")
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid webhook signature")
     if event["type"] == "customer.subscription.created" or event["type"] == "customer.subscription.updated":
@@ -756,6 +749,13 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             if data:
                 price_obj = data[0].get("price")
                 price_id = (price_obj.get("id") if isinstance(price_obj, dict) else price_obj) or ""
+            plan = "pro" if price_id == STRIPE_PRO_PRICE_ID else "starter"
+            user = db.query(DBUser).filter(DBUser.stripe_customer_id == customer_id).first()
+            if user:
+                user.stripe_subscription_id = sub_id
+                user.plan = plan
+                db.commit()
+    elif event["type"] == "customer.subscription.deleted":
         sub = event["data"]["object"]
         user = db.query(DBUser).filter(DBUser.stripe_subscription_id == sub["id"]).first()
         if user:
