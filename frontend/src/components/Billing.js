@@ -36,7 +36,7 @@ function Billing() {
 
   const isLocalhostMode = STRIPE_PUBLISHABLE_KEY === 'localhost';
   const hasActiveSub = usage?.has_active_subscription === true;
-  const hasInvoicingAddress = user?.billing_address_line1 && user?.billing_postal_code && user?.billing_city && user?.billing_country;
+  const hasInvoicingAddress = user?.billing_first_name && user?.billing_last_name && user?.billing_address_line1 && user?.billing_postal_code && user?.billing_city && user?.billing_country;
 
   useEffect(() => {
     let cancelled = false;
@@ -134,7 +134,7 @@ function Billing() {
 
       {!isLocalhostMode && !hasActiveSub && (
         <Paper sx={{ p: 2, mb: 3 }}>
-          <Typography variant="h6" gutterBottom>Invoicing address (French law)</Typography>
+          <Typography variant="h6" gutterBottom>Invoicing address</Typography>
           {hasInvoicingAddress ? (
             <>
               <Typography variant="body2" color="text.secondary" paragraph>
@@ -147,7 +147,7 @@ function Billing() {
           ) : (
             <>
               <Alert severity="warning" sx={{ mb: 1 }}>
-                Invoices require a full invoicing address under French law. Set your address in Profile before subscribing.
+                Invoices require first name, last name, and full address in Profile before subscribing.
               </Alert>
               <Button component={RouterLink} to="/profile" variant="outlined" color="primary">
                 Set invoicing address in Profile
@@ -278,14 +278,7 @@ function Billing() {
               </CardActions>
             </Card>
           ))}
-          {plans.length === 0 && !isLocalhostMode && (
-            <Paper sx={{ p: 2 }}>
-              <Typography variant="subtitle2" gutterBottom>No subscription plans yet</Typography>
-              <Typography variant="body2" color="text.secondary">
-                To offer Starter and Pro subscriptions, create Products and Prices in your Stripe Dashboard, then add their Price IDs (e.g. <code>price_xxx</code>) to your server&apos;s .env: <code>STRIPE_STARTER_PRICE_ID</code> and <code>STRIPE_PRO_PRICE_ID</code>. Until then, only the free plan is available.
-              </Typography>
-            </Paper>
-          )}
+
         </Box>
       )}
     </Container>

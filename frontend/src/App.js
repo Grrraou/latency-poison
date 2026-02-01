@@ -15,6 +15,7 @@ import Billing from './components/Billing';
 import Health from './components/Health';
 import Dashboard from './components/Dashboard';
 import Profile from './components/Profile';
+import VerifyEmail from './components/VerifyEmail';
 import { UserProvider } from './contexts/UserContext';
 
 const theme = createTheme({
@@ -38,6 +39,7 @@ function AppContent({ user, setUser }) {
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={!user ? <Login setUser={setUser} /> : <Navigate to="/configs" />} />
           <Route path="/register" element={!user ? <Register setUser={setUser} /> : <Navigate to="/configs" />} />
+          <Route path="/verify-email" element={<VerifyEmail />} />
           <Route path="/sandbox" element={<QuickSandbox />} />
           <Route path="/health" element={<Health />} />
           <Route path="/docs" element={<Documentation />} />

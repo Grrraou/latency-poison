@@ -20,22 +20,44 @@ const handleResponse = async (response) => {
   return data;
 };
 
-export const login = async (username, password) => {
+export const login = async (email, password) => {
   const response = await fetch(API_ENDPOINTS.AUTH.LOGIN, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ email, password }),
   });
   const data = await handleResponse(response);
   localStorage.setItem('token', data.access_token);
   return data;
 };
 
-export const register = async (username, email, password) => {
+export const register = async (email, password) => {
   const response = await fetch(API_ENDPOINTS.AUTH.REGISTER, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, email, password }),
+    body: JSON.stringify({ email, password }),
+  });
+  return handleResponse(response);
+};
+
+export const verifyEmail = async (token) => {
+  const response = await fetch(`${API_ENDPOINTS.AUTH.VERIFY_EMAIL}?token=${encodeURIComponent(token)}`);
+  return handleResponse(response);
+};
+
+export const resendVerification = async (email) => {
+  const response = await fetch(API_ENDPOINTS.AUTH.RESEND_VERIFICATION, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  return handleResponse(response);
+};
+
+export const resendVerificationMe = async () => {
+  const response = await fetch(API_ENDPOINTS.USER_RESEND_VERIFICATION, {
+    method: 'POST',
+    headers: getAuthHeader(),
   });
   return handleResponse(response);
 };

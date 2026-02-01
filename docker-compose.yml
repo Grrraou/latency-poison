@@ -69,6 +69,12 @@ services:
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - ENVIRONMENT=${ENVIRONMENT:-development}
+      # Optional: send real verification emails from localhost (see README)
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-Latency Poison <noreply@localhost>}
     volumes:
       - ./api:/app
     depends_on:

@@ -60,4 +60,25 @@ Pour que les abonnements mettent à jour le plan en base, Stripe envoie des webh
 
 Le container `api` lit déjà `STRIPE_WEBHOOK_SECRET` depuis le `.env` (voir `docker-compose.yml`).
 
+## Sending verification emails from localhost
+
+To deliver real verification emails (e.g. to Gmail) when running locally, set SMTP in your `.env`. The API uses these variables; if `SMTP_HOST` is empty, no email is sent and the verification link is shown in the UI and in API logs.
+
+**Gmail (App Password)**  
+1. Google Account → Security → 2-Step Verification (enable it).  
+2. Security → App passwords → generate one for “Mail”.  
+3. In `.env`:
+```env
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your@gmail.com
+SMTP_PASSWORD=your-16-char-app-password
+SMTP_FROM=Latency Poison <your@gmail.com>
+```
+4. Restart the API: `docker compose restart api`.
+
+**Other providers**  
+- **SendGrid / Mailgun**: use their SMTP host, port 587, and API key or password in `SMTP_PASSWORD`.  
+- **Outlook**: `SMTP_HOST=smtp-mail.outlook.com`, port 587, and your account password (or app password if 2FA is on).
+
 Do not use in production. Development and testing only.

@@ -8,6 +8,7 @@ import {
   TextField,
   Snackbar,
   Alert,
+  Link,
   MenuItem,
   FormControl,
   InputLabel,
@@ -16,7 +17,7 @@ import {
 import PersonIcon from '@mui/icons-material/Person';
 import LockIcon from '@mui/icons-material/Lock';
 import BusinessIcon from '@mui/icons-material/Business';
-import { getCurrentUser, updateCurrentUser } from '../services/api';
+import { getCurrentUser, updateCurrentUser, resendVerificationMe } from '../services/api';
 
 const COUNTRY_OPTIONS = [
   { value: 'FR', label: 'France' },
@@ -40,11 +41,11 @@ function Profile() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [profile, setProfile] = useState({
-    username: '',
     email: '',
-    full_name: '',
   });
   const [billing, setBilling] = useState({
+    billing_first_name: '',
+    billing_last_name: '',
     billing_company: '',
     billing_address_line1: '',
     billing_address_line2: '',
@@ -58,27 +59,33 @@ function Profile() {
     confirm_password: '',
   });
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [pendingEmail, setPendingEmail] = useState(null);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [verificationLink, setVerificationLink] = useState(null);
+
+  const loadUser = async () => {
+    const user = await getCurrentUser();
+    setProfile({
+      email: user.email || '',
+    });
+    setPendingEmail(user.pending_email || null);
+    setBilling({
+      billing_first_name: user.billing_first_name || '',
+      billing_last_name: user.billing_last_name || '',
+      billing_company: user.billing_company || '',
+      billing_address_line1: user.billing_address_line1 || '',
+      billing_address_line2: user.billing_address_line2 || '',
+      billing_postal_code: user.billing_postal_code || '',
+      billing_city: user.billing_city || '',
+      billing_country: user.billing_country || '',
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const user = await getCurrentUser();
-        if (!cancelled) {
-          setProfile({
-            username: user.username || '',
-            email: user.email || '',
-            full_name: user.full_name || '',
-          });
-          setBilling({
-            billing_company: user.billing_company || '',
-            billing_address_line1: user.billing_address_line1 || '',
-            billing_address_line2: user.billing_address_line2 || '',
-            billing_postal_code: user.billing_postal_code || '',
-            billing_city: user.billing_city || '',
-            billing_country: user.billing_country || '',
-          });
-        }
+        await loadUser();
       } catch (e) {
         if (!cancelled) {
           setSnackbar({ open: true, message: e.message || 'Failed to load profile', severity: 'error' });
@@ -89,6 +96,21 @@ function Profile() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  const handleResendVerification = async () => {
+    setResendLoading(true);
+    setVerificationLink(null);
+    try {
+      const data = await resendVerificationMe();
+      setSnackbar({ open: true, message: data.message || 'Verification email sent.', severity: 'success' });
+      if (data.verification_link) setVerificationLink(data.verification_link);
+      await loadUser();
+    } catch (e) {
+      setSnackbar({ open: true, message: e.response?.data?.detail || e.message || 'Failed to resend', severity: 'error' });
+    } finally {
+      setResendLoading(false);
+    }
+  };
 
   const handleProfileChange = (field) => (e) => {
     setProfile((p) => ({ ...p, [field]: e.target.value }));
@@ -104,14 +126,15 @@ function Profile() {
 
   const handleSaveProfile = async () => {
     setSaving(true);
+    setVerificationLink(null);
     try {
       const payload = {
-        username: profile.username.trim() || undefined,
         email: profile.email.trim() || undefined,
-        full_name: profile.full_name.trim() || undefined,
       };
-      await updateCurrentUser(payload);
-      setSnackbar({ open: true, message: 'Profile updated', severity: 'success' });
+      const data = await updateCurrentUser(payload);
+      setSnackbar({ open: true, message: payload.email ? 'If you changed your email, check the new inbox to verify.' : 'Profile updated', severity: 'success' });
+      if (data.verification_link) setVerificationLink(data.verification_link);
+      await loadUser();
     } catch (e) {
       setSnackbar({ open: true, message: e.response?.data?.detail || e.message || 'Update failed', severity: 'error' });
     } finally {
@@ -123,6 +146,8 @@ function Profile() {
     setSaving(true);
     try {
       const payload = {
+        billing_first_name: billing.billing_first_name.trim() || undefined,
+        billing_last_name: billing.billing_last_name.trim() || undefined,
         billing_company: billing.billing_company.trim() || undefined,
         billing_address_line1: billing.billing_address_line1.trim() || undefined,
         billing_address_line2: billing.billing_address_line2.trim() || undefined,
@@ -181,14 +206,17 @@ function Profile() {
           <PersonIcon color="action" />
           <Typography variant="subtitle1">Profile</Typography>
         </Box>
-        <TextField
-          fullWidth
-          label="Username"
-          value={profile.username}
-          onChange={handleProfileChange('username')}
-          margin="normal"
-          required
-        />
+        {pendingEmail && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            Verification link sent to <strong>{pendingEmail}</strong>. Click it to confirm.
+            <Button size="small" onClick={handleResendVerification} disabled={resendLoading} sx={{ ml: 1 }}>Resend</Button>
+          </Alert>
+        )}
+        {verificationLink && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            No email server configured. Use this link to verify: <Link href={verificationLink} target="_blank" rel="noopener noreferrer">Verify my email</Link>
+          </Alert>
+        )}
         <TextField
           fullWidth
           label="Email"
@@ -197,13 +225,7 @@ function Profile() {
           onChange={handleProfileChange('email')}
           margin="normal"
           required
-        />
-        <TextField
-          fullWidth
-          label="Full name"
-          value={profile.full_name}
-          onChange={handleProfileChange('full_name')}
-          margin="normal"
+          helperText="Current email. Change it here and save to request a verification link to the new address."
         />
         <Button
           variant="contained"
@@ -223,6 +245,24 @@ function Profile() {
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Required for invoices under French law. Used on your subscription invoices.
         </Typography>
+        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+          <TextField
+            label="First name"
+            value={billing.billing_first_name}
+            onChange={handleBillingChange('billing_first_name')}
+            margin="normal"
+            required
+            sx={{ minWidth: 140, flex: 1 }}
+          />
+          <TextField
+            label="Last name"
+            value={billing.billing_last_name}
+            onChange={handleBillingChange('billing_last_name')}
+            margin="normal"
+            required
+            sx={{ minWidth: 140, flex: 1 }}
+          />
+        </Box>
         <TextField
           fullWidth
           label="Company (optional)"

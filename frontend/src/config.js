@@ -9,7 +9,10 @@ export const API_ENDPOINTS = {
     LOGIN: `${API_BASE_URL}/api/auth/login`,
     REGISTER: `${API_BASE_URL}/api/auth/register`,
     ME: `${API_BASE_URL}/api/users/me`,
+    VERIFY_EMAIL: `${API_BASE_URL}/api/auth/verify-email`,
+    RESEND_VERIFICATION: `${API_BASE_URL}/api/auth/resend-verification`,
   },
+  USER_RESEND_VERIFICATION: `${API_BASE_URL}/api/users/me/resend-verification`,
   CONFIG_KEYS: `${API_BASE_URL}/api/config-keys`,
   SANDBOX: `${PROXY_API_BASE_URL}/sandbox`,
   HEALTH: {

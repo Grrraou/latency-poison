@@ -14,6 +14,7 @@ import secrets
 
 import stripe
 from database import get_db, User as DBUser, ConfigApiKey as DBConfigApiKey, UsageLog as DBUsageLog
+from email_sender import send_verification_email
 from billing import (
     PLAN_LIMITS,
     get_effective_plan,
@@ -28,6 +29,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 if os.getenv("ENVIRONMENT") == "production" and SECRET_KEY == "your-secret-key-here":
     raise RuntimeError("Set SECRET_KEY in production")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
@@ -42,6 +44,7 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
     return response
 
 app = FastAPI()
@@ -77,30 +80,24 @@ class UserMe(BaseModel):
     plan: str = "free"
     trial_ends_at: Optional[datetime] = None
     has_active_subscription: bool = False
+    email_verified: bool = False
+    pending_email: Optional[str] = None
     # Invoicing address (required for invoices under French law)
+    billing_first_name: Optional[str] = None
+    billing_last_name: Optional[str] = None
     billing_company: Optional[str] = None
     billing_address_line1: Optional[str] = None
     billing_address_line2: Optional[str] = None
     billing_postal_code: Optional[str] = None
     billing_city: Optional[str] = None
     billing_country: Optional[str] = None
+    verification_link: Optional[str] = None  # Set when SMTP not configured (dev) so UI can show link
 
 
 class UserCreate(BaseModel):
-    username: str = Field(..., min_length=1, max_length=255)
     email: str = Field(..., min_length=1, max_length=255)
     password: str = Field(..., min_length=8, max_length=128)
     full_name: Optional[str] = Field(None, max_length=255)
-
-    @field_validator("username")
-    @classmethod
-    def username_format(cls, v: str) -> str:
-        v = (v or "").strip()
-        if not v:
-            raise ValueError("Username is required")
-        if not re.match(r"^[a-zA-Z0-9_.-]+$", v):
-            raise ValueError("Username can only contain letters, numbers, and _ . - (no spaces or @)")
-        return v.lower()
 
     @field_validator("email")
     @classmethod
@@ -111,12 +108,13 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    username: Optional[str] = Field(None, min_length=1, max_length=255)
     email: Optional[str] = Field(None, min_length=1, max_length=255)
     full_name: Optional[str] = Field(None, max_length=255)
     current_password: Optional[str] = None
     new_password: Optional[str] = Field(None, min_length=8, max_length=128)
     # Invoicing address (required for invoices under French law)
+    billing_first_name: Optional[str] = Field(None, max_length=255)
+    billing_last_name: Optional[str] = Field(None, max_length=255)
     billing_company: Optional[str] = Field(None, max_length=255)
     billing_address_line1: Optional[str] = Field(None, max_length=255)
     billing_address_line2: Optional[str] = Field(None, max_length=255)
@@ -124,15 +122,15 @@ class UserUpdate(BaseModel):
     billing_city: Optional[str] = Field(None, max_length=255)
     billing_country: Optional[str] = Field(None, max_length=2)
 
-    @field_validator("username")
+    @field_validator("billing_country")
     @classmethod
-    def username_format(cls, v: Optional[str]) -> Optional[str]:
-        if v is None or not v.strip():
+    def billing_country_format(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not (v or "").strip():
             return v
-        v = v.strip()
-        if not re.match(r"^[a-zA-Z0-9_.-]+$", v):
-            raise ValueError("Username can only contain letters, numbers, and _ . - (no spaces or @)")
-        return v.lower()
+        c = (v.strip() or "").upper()
+        if len(c) != 2 or not c.isalpha():
+            raise ValueError("Country must be a 2-letter ISO code (e.g. FR)")
+        return c
 
     @field_validator("email")
     @classmethod
@@ -147,11 +145,22 @@ class UserUpdate(BaseModel):
 
 def _user_has_invoicing_address(user) -> bool:
     """Check if user has minimum invoicing address (required for French law)."""
+    first = (getattr(user, "billing_first_name", None) or "").strip()
+    last = (getattr(user, "billing_last_name", None) or "").strip()
     line1 = (getattr(user, "billing_address_line1", None) or "").strip()
     postal = (getattr(user, "billing_postal_code", None) or "").strip()
     city = (getattr(user, "billing_city", None) or "").strip()
     country = (getattr(user, "billing_country", None) or "").strip().upper()
-    return bool(line1 and postal and city and country and len(country) == 2)
+    return bool(first and last and line1 and postal and city and country and len(country) == 2)
+
+
+def _stripe_customer_name_from_user(user) -> Optional[str]:
+    """Full name for Stripe customer (invoices)."""
+    first = (getattr(user, "billing_first_name", None) or "").strip()
+    last = (getattr(user, "billing_last_name", None) or "").strip()
+    if not first and not last:
+        return None
+    return f"{first} {last}".strip() or None
 
 
 def _stripe_address_from_user(user) -> dict:
@@ -269,8 +278,33 @@ def verify_password(plain_password, hashed_password):
 def get_user(db: Session, username: str):
     return db.query(DBUser).filter(DBUser.username == username).first()
 
-def authenticate_user(db: Session, username: str, password: str):
-    user = get_user(db, username)
+def get_user_by_email(db: Session, email: str):
+    if not email or not email.strip():
+        return None
+    return db.query(DBUser).filter(DBUser.email == email.strip().lower()).first()
+
+def get_user_by_verification_token(db: Session, token: str):
+    if not token or not token.strip():
+        return None
+    return db.query(DBUser).filter(
+        DBUser.verification_token == token.strip(),
+        DBUser.verification_token_expires != None,
+        DBUser.verification_token_expires > datetime.utcnow(),
+    ).first()
+
+VERIFICATION_TOKEN_EXPIRE_HOURS = 24
+
+def set_verification_and_send(db: Session, user: DBUser, email_to: str, is_new_email: bool = False) -> Optional[str]:
+    """Set verification token on user and send email. Commits token to DB. Returns verification_link when SMTP not configured (dev)."""
+    token = secrets.token_urlsafe(32)
+    user.verification_token = token
+    user.verification_token_expires = datetime.utcnow() + timedelta(hours=VERIFICATION_TOKEN_EXPIRE_HOURS)
+    db.commit()
+    verify_url = f"{FRONTEND_URL}/verify-email?token={token}"
+    return send_verification_email(email_to, verify_url, is_new_email=is_new_email)
+
+def authenticate_user(db: Session, email: str, password: str):
+    user = get_user_by_email(db, email)
     if not user or not verify_password(password, user.hashed_password):
         return False
     return user
@@ -289,8 +323,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
+        sub: str = payload.get("sub")
+        if sub is None:
             raise credentials_exception
     except ExpiredSignatureError:
         raise HTTPException(
@@ -300,49 +334,127 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         )
     except JWTError:
         raise credentials_exception
-    user = get_user(db, username=username)
+    # sub is email (new tokens) or username (legacy)
+    user = get_user_by_email(db, sub)
+    if user is None:
+        user = get_user(db, username=sub)
     if user is None:
         raise credentials_exception
     return user
 
 class LoginRequest(BaseModel):
-    username: str = Field(..., min_length=1, max_length=255)
+    email: str = Field(..., min_length=1, max_length=255)
     password: str = Field(..., min_length=1, max_length=128)
 
 # Routes
 @app.post("/api/auth/login")
 async def login_for_access_token(body: LoginRequest, db: Session = Depends(get_db)):
     try:
-        user = authenticate_user(db, body.username.strip(), body.password)
+        user = authenticate_user(db, body.email.strip(), body.password)
         if not user:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password", headers={"WWW-Authenticate": "Bearer"})
-        access_token = create_access_token(data={"sub": user.username}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password", headers={"WWW-Authenticate": "Bearer"})
+        email_verified = getattr(user, "email_verified", True)
+        if not email_verified:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Please verify your email before logging in. Check your inbox or use the resend link.",
+            )
+        access_token = create_access_token(data={"sub": user.email}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
         return {"access_token": access_token, "token_type": "bearer"}
     except HTTPException:
         raise
     except Exception:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password", headers={"WWW-Authenticate": "Bearer"})
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password", headers={"WWW-Authenticate": "Bearer"})
 
 @app.post("/api/auth/register")
 async def register_user(body: UserCreate, db: Session = Depends(get_db)):
     try:
-        username = body.username.strip().lower()
-        if db.query(DBUser).filter(DBUser.username == username).first():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already registered")
-        if db.query(DBUser).filter(DBUser.email == body.email).first():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+        email = (body.email or "").strip().lower()
+        if not email or "@" not in email:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email")
+        existing = db.query(DBUser).filter(DBUser.email == email).first()
+        if existing:
+            # Only block if we're sure the account is verified (default to unverified if column missing)
+            is_verified = getattr(existing, "email_verified", None)
+            if is_verified is True or is_verified == 1:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+            # Unverified account: send a new verification link and update password so they can retry
+            existing.hashed_password = pwd_context.hash(body.password)
+            existing.full_name = body.full_name or existing.full_name
+            db.commit()
+            db.refresh(existing)
+            verification_link = set_verification_and_send(db, existing, existing.email, is_new_email=False)
+            out = {
+                "message": "A new verification link has been sent. Please check your email to verify your account.",
+                "email": existing.email,
+            }
+            if verification_link:
+                out["verification_link"] = verification_link
+            return out
         db_user = DBUser(
-            username=username, email=body.email, full_name=body.full_name or None,
-            hashed_password=pwd_context.hash(body.password), disabled=False
+            username=email,
+            email=email,
+            full_name=body.full_name or None,
+            hashed_password=pwd_context.hash(body.password),
+            disabled=False,
+            email_verified=False,
         )
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
-        return User(username=db_user.username, email=db_user.email, full_name=db_user.full_name, disabled=db_user.disabled)
+        verification_link = set_verification_and_send(db, db_user, db_user.email, is_new_email=False)
+        out = {
+            "message": "Registration successful. Please check your email to verify your account before logging in.",
+            "email": db_user.email,
+        }
+        if verification_link:
+            out["verification_link"] = verification_link
+        return out
     except HTTPException:
         raise
     except Exception:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request")
+
+
+@app.get("/api/auth/verify-email")
+async def verify_email(token: str, db: Session = Depends(get_db)):
+    """Verify email from link (registration or change-email). No auth required."""
+    user = get_user_by_verification_token(db, token)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification link.")
+    user.verification_token = None
+    user.verification_token_expires = None
+    user.email_verified = True
+    if getattr(user, "pending_email", None):
+        user.email = user.pending_email
+        user.username = user.pending_email
+        user.pending_email = None
+    db.commit()
+    return {"message": "Email verified. You can now log in.", "verified": True}
+
+
+class ResendVerificationRequest(BaseModel):
+    email: Optional[str] = Field(None, max_length=255)
+
+
+@app.post("/api/auth/resend-verification")
+async def resend_verification(body: ResendVerificationRequest, db: Session = Depends(get_db)):
+    """Resend verification email. Pass email (for unauthenticated) or use current user."""
+    email = (body.email or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is required")
+    user = db.query(DBUser).filter(DBUser.email == email).first()
+    if not user:
+        # Don't reveal whether email exists
+        return {"message": "If an account exists for this email, a verification link was sent."}
+    if getattr(user, "email_verified", True):
+        return {"message": "This email is already verified. You can log in."}
+    verification_link = set_verification_and_send(db, user, user.email, is_new_email=False)
+    out = {"message": "Verification email sent. Please check your inbox."}
+    if verification_link:
+        out["verification_link"] = verification_link
+    return out
+
 
 @app.get("/api/users/me", response_model=UserMe)
 async def read_users_me(db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
@@ -356,6 +468,10 @@ async def read_users_me(db: Session = Depends(get_db), current_user: DBUser = De
         plan=plan,
         trial_ends_at=getattr(current_user, "trial_ends_at", None),
         has_active_subscription=has_sub,
+        email_verified=getattr(current_user, "email_verified", True),
+        pending_email=getattr(current_user, "pending_email", None),
+        billing_first_name=getattr(current_user, "billing_first_name", None),
+        billing_last_name=getattr(current_user, "billing_last_name", None),
         billing_company=getattr(current_user, "billing_company", None),
         billing_address_line1=getattr(current_user, "billing_address_line1", None),
         billing_address_line2=getattr(current_user, "billing_address_line2", None),
@@ -365,23 +481,42 @@ async def read_users_me(db: Session = Depends(get_db), current_user: DBUser = De
     )
 
 
+@app.post("/api/users/me/resend-verification")
+async def resend_verification_me(db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
+    """Resend verification email for current user (to pending_email if set, else to email)."""
+    email_to = getattr(current_user, "pending_email", None) or current_user.email
+    if not email_to:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No email to verify")
+    if getattr(current_user, "email_verified", True) and not getattr(current_user, "pending_email", None):
+        return {"message": "Your email is already verified."}
+    verification_link = set_verification_and_send(db, current_user, email_to, is_new_email=bool(getattr(current_user, "pending_email", None)))
+    out = {"message": "Verification email sent. Please check your inbox."}
+    if verification_link:
+        out["verification_link"] = verification_link
+    return out
+
+
 @app.patch("/api/users/me", response_model=UserMe)
 async def update_users_me(
     body: UserUpdate,
     db: Session = Depends(get_db),
     current_user: DBUser = Depends(get_current_user),
 ):
-    """Update current user profile (username, email, full_name) and/or password."""
-    if body.username is not None:
-        existing = db.query(DBUser).filter(DBUser.username == body.username, DBUser.id != current_user.id).first()
-        if existing:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already taken")
-        current_user.username = body.username
+    """Update current user profile (email, full_name) and/or password."""
+    dev_verification_link: Optional[str] = None
     if body.email is not None:
-        existing = db.query(DBUser).filter(DBUser.email == body.email, DBUser.id != current_user.id).first()
-        if existing:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
-        current_user.email = body.email
+        new_email = body.email.strip().lower()
+        if new_email != (current_user.email or "").strip().lower():
+            from sqlalchemy import or_
+            existing = db.query(DBUser).filter(
+                or_(DBUser.email == new_email, DBUser.pending_email == new_email),
+                DBUser.id != current_user.id,
+            ).first()
+            if existing:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered or pending verification")
+            current_user.pending_email = new_email
+            current_user.email_verified = False
+            dev_verification_link = set_verification_and_send(db, current_user, new_email, is_new_email=True)
     if body.full_name is not None:
         current_user.full_name = body.full_name.strip() or None
     if body.new_password is not None:
@@ -391,6 +526,10 @@ async def update_users_me(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
         current_user.hashed_password = pwd_context.hash(body.new_password)
     # Invoicing address (required for invoices under French law)
+    if body.billing_first_name is not None:
+        current_user.billing_first_name = body.billing_first_name.strip() or None
+    if body.billing_last_name is not None:
+        current_user.billing_last_name = body.billing_last_name.strip() or None
     if body.billing_company is not None:
         current_user.billing_company = body.billing_company.strip() or None
     if body.billing_address_line1 is not None:
@@ -405,14 +544,18 @@ async def update_users_me(
         current_user.billing_country = (body.billing_country.strip() or "").upper() or None
     db.commit()
     db.refresh(current_user)
-    # Sync invoicing address to Stripe so invoices show it (French law)
+    # Sync invoicing address to Stripe so invoices show it
     cid = getattr(current_user, "stripe_customer_id", None)
     if cid and STRIPE_SECRET_KEY and STRIPE_SECRET_KEY != "localhost":
         addr = _stripe_address_from_user(current_user)
-        if any(addr.values()):
+        name = _stripe_customer_name_from_user(current_user)
+        if any(addr.values()) or name:
             try:
                 client = stripe.StripeClient(STRIPE_SECRET_KEY)
-                client.customers.update(cid, params={"address": addr})
+                params = {"address": addr}
+                if name:
+                    params["name"] = name
+                client.customers.update(cid, params=params)
             except stripe.StripeError:
                 pass
     plan = get_effective_plan(current_user)
@@ -425,13 +568,19 @@ async def update_users_me(
         plan=plan,
         trial_ends_at=getattr(current_user, "trial_ends_at", None),
         has_active_subscription=has_sub,
+        email_verified=getattr(current_user, "email_verified", True),
+        pending_email=getattr(current_user, "pending_email", None),
+        billing_first_name=getattr(current_user, "billing_first_name", None),
+        billing_last_name=getattr(current_user, "billing_last_name", None),
         billing_company=getattr(current_user, "billing_company", None),
         billing_address_line1=getattr(current_user, "billing_address_line1", None),
         billing_address_line2=getattr(current_user, "billing_address_line2", None),
         billing_postal_code=getattr(current_user, "billing_postal_code", None),
         billing_city=getattr(current_user, "billing_city", None),
         billing_country=getattr(current_user, "billing_country", None),
+        verification_link=dev_verification_link,
     )
+
 
 
 @app.get("/")
@@ -770,7 +919,6 @@ STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "localhost")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_STARTER_PRICE_ID = os.getenv("STRIPE_STARTER_PRICE_ID", "")
 STRIPE_PRO_PRICE_ID = os.getenv("STRIPE_PRO_PRICE_ID", "")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 
 
 @app.post("/api/billing/trial")
@@ -818,7 +966,7 @@ async def create_checkout(
     if not _user_has_invoicing_address(current_user):
         raise HTTPException(
             status_code=400,
-            detail="Please set your invoicing address in Profile or Billing before subscribing. Invoices require a full billing address (address, postal code, city, country) under French law.",
+            detail="Please set your invoicing address in Profile before subscribing: first name, last name, address, postal code, city, and country are required for invoices under French law.",
         )
     allowed = _allowed_checkout_price_ids()
     if not allowed or body.price_id not in allowed:
@@ -828,21 +976,26 @@ async def create_checkout(
         )
     client = stripe.StripeClient(STRIPE_SECRET_KEY)
     addr = _stripe_address_from_user(current_user)
+    name = _stripe_customer_name_from_user(current_user)
     if getattr(current_user, "stripe_customer_id", None):
         customer_id = current_user.stripe_customer_id
-        # Ensure Stripe customer has current invoicing address for invoices
+        # Ensure Stripe customer has current invoicing address and name for invoices
         try:
-            client.customers.update(customer_id, params={"address": addr})
+            params = {"address": addr}
+            if name:
+                params["name"] = name
+            client.customers.update(customer_id, params=params)
         except stripe.StripeError:
             pass
     else:
-        customer = client.customers.create(
-            params={
-                "email": current_user.email or "",
-                "metadata": {"user_id": str(current_user.id)},
-                "address": addr,
-            }
-        )
+        create_params = {
+            "email": current_user.email or "",
+            "metadata": {"user_id": str(current_user.id)},
+            "address": addr,
+        }
+        if name:
+            create_params["name"] = name
+        customer = client.customers.create(params=create_params)
         customer_id = customer.id
         current_user.stripe_customer_id = customer_id
         db.commit()

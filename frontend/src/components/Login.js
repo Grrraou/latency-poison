@@ -8,16 +8,22 @@ import {
   Button,
   Box,
   Link,
+  Alert,
+  Collapse,
 } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
-import { login } from '../services/api';
+import { login, resendVerification } from '../services/api';
 
 function Login({ setUser }) {
   const [formData, setFormData] = useState({
-    username: '',
+    email: '',
     password: '',
   });
   const [error, setError] = useState('');
+  const [emailNotVerified, setEmailNotVerified] = useState(false);
+  const [resendEmail, setResendEmail] = useState('');
+  const [resendMessage, setResendMessage] = useState('');
+  const [resendLink, setResendLink] = useState(null);
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -29,10 +35,12 @@ function Login({ setUser }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError('');
+    setEmailNotVerified(false);
     try {
-      const data = await login(formData.username, formData.password);
+      const data = await login(formData.email, formData.password);
       const user = {
-        username: formData.username,
+        email: formData.email,
         token: data.access_token
       };
       localStorage.setItem('token', data.access_token);
@@ -40,7 +48,11 @@ function Login({ setUser }) {
       navigate('/configs');
     } catch (err) {
       console.error('Login error:', err);
-      // Handle different types of error responses
+      if (err.status === 403) {
+        setEmailNotVerified(true);
+        setError(err.response?.data?.detail || 'Please verify your email before logging in.');
+        return;
+      }
       if (err.response?.data?.detail) {
         const errorDetail = err.response.data.detail;
         if (typeof errorDetail === 'string') {
@@ -58,6 +70,19 @@ function Login({ setUser }) {
     }
   };
 
+  const handleResend = async () => {
+    if (!resendEmail.trim()) return;
+    setResendMessage('');
+    setResendLink(null);
+    try {
+      const data = await resendVerification(resendEmail.trim());
+      setResendMessage(data.message || 'Verification email sent.');
+      if (data.verification_link) setResendLink(data.verification_link);
+    } catch (err) {
+      setResendMessage(err.response?.data?.detail || 'Failed to resend.');
+    }
+  };
+
   return (
     <Container maxWidth="sm">
       <Box sx={{ mt: 8 }}>
@@ -66,16 +91,39 @@ function Login({ setUser }) {
             Login
           </Typography>
           {error && (
-            <Typography color="error" align="center" gutterBottom>
+            <Alert severity={emailNotVerified ? 'warning' : 'error'} sx={{ mb: 2 }}>
               {error}
-            </Typography>
+            </Alert>
           )}
+          <Collapse in={emailNotVerified}>
+            <Box sx={{ mb: 2, p: 1, bgcolor: 'action.hover' }}>
+              <Typography variant="body2" gutterBottom>Resend verification email</Typography>
+              <TextField
+                size="small"
+                fullWidth
+                label="Email"
+                type="email"
+                value={resendEmail}
+                onChange={(e) => setResendEmail(e.target.value)}
+                margin="dense"
+                placeholder="Your registration email"
+              />
+              <Button size="small" onClick={handleResend} sx={{ mt: 1 }}>Send</Button>
+              {resendMessage && <Typography variant="caption" display="block" sx={{ mt: 1 }}>{resendMessage}</Typography>}
+              {resendLink && (
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  No email server configured. Use this link: <Link href={resendLink} target="_blank" rel="noopener noreferrer">Verify my email</Link>
+                </Alert>
+              )}
+            </Box>
+          </Collapse>
           <form onSubmit={handleSubmit}>
             <TextField
               fullWidth
-              label="Username"
-              name="username"
-              value={formData.username}
+              label="Email"
+              name="email"
+              type="email"
+              value={formData.email}
               onChange={handleChange}
               margin="normal"
               required

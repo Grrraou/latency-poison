@@ -33,12 +33,18 @@ def run_migrations(db):
         ("trial_ends_at", "DATETIME NULL"),
         ("stripe_customer_id", "VARCHAR(255) NULL"),
         ("stripe_subscription_id", "VARCHAR(255) NULL"),
+        ("billing_first_name", "VARCHAR(255) NULL"),
+        ("billing_last_name", "VARCHAR(255) NULL"),
         ("billing_company", "VARCHAR(255) NULL"),
         ("billing_address_line1", "VARCHAR(255) NULL"),
         ("billing_address_line2", "VARCHAR(255) NULL"),
         ("billing_postal_code", "VARCHAR(32) NULL"),
         ("billing_city", "VARCHAR(255) NULL"),
         ("billing_country", "VARCHAR(2) NULL"),
+        ("email_verified", "TINYINT(1) NOT NULL DEFAULT 0"),
+        ("pending_email", "VARCHAR(255) NULL"),
+        ("verification_token", "VARCHAR(255) NULL"),
+        ("verification_token_expires", "DATETIME NULL"),
     ]:
         try:
             db.execute(text(f"ALTER TABLE users ADD COLUMN {col} {spec}"))
@@ -46,6 +52,13 @@ def run_migrations(db):
             print(f"Added column {col} to users")
         except Exception:
             db.rollback()
+    # Mark existing users as email_verified (backfill)
+    try:
+        db.execute(text("UPDATE users SET email_verified = 1 WHERE email_verified = 0 AND verification_token IS NULL"))
+        db.commit()
+        print("Backfilled email_verified for existing users")
+    except Exception:
+        db.rollback()
     # Ensure usage_log exists (proxy writes here for dashboard timeline)
     try:
         db.execute(text("""
@@ -79,6 +92,7 @@ def init_db():
                 full_name=ADMIN_FULL_NAME,
                 hashed_password=pwd_context.hash(ADMIN_PASSWORD),
                 disabled=False,
+                email_verified=True,
             )
             db.add(admin_user)
             db.commit()

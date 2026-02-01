@@ -35,12 +35,19 @@ class User(Base):
     stripe_customer_id = Column(String(255), nullable=True, index=True)
     stripe_subscription_id = Column(String(255), nullable=True, index=True)
     # Invoicing address (required for invoices under French law)
+    billing_first_name = Column(String(255), nullable=True)
+    billing_last_name = Column(String(255), nullable=True)
     billing_company = Column(String(255), nullable=True)
     billing_address_line1 = Column(String(255), nullable=True)
     billing_address_line2 = Column(String(255), nullable=True)
     billing_postal_code = Column(String(32), nullable=True)
     billing_city = Column(String(255), nullable=True)
     billing_country = Column(String(2), nullable=True)  # ISO 3166-1 alpha-2 (e.g. FR)
+    # Email verification (registration + change email)
+    email_verified = Column(Boolean, default=False, nullable=False)
+    pending_email = Column(String(255), nullable=True)  # new email until verified
+    verification_token = Column(String(255), nullable=True, index=True)
+    verification_token_expires = Column(DateTime, nullable=True)
     config_api_keys = relationship("ConfigApiKey", back_populates="owner", cascade="all, delete-orphan")
 
 
