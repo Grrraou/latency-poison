@@ -73,6 +73,22 @@ restart:
 	docker-compose up -d
 
 # =============================================================================
+# STRIPE WEBHOOK (local dev with Docker)
+# =============================================================================
+# Forwards Stripe webhooks to the API container via Stripe CLI in Docker.
+# First time: make stripe-login (browser auth), then make stripe-listen.
+# 1. make stripe-listen
+# 2. Copy the "whsec_..." signing secret into .env as STRIPE_WEBHOOK_SECRET
+# 3. docker-compose restart api
+stripe-listen:
+	@echo "Forwarding Stripe webhooks to API container (api:8000). Copy whsec_... into .env as STRIPE_WEBHOOK_SECRET, then: docker-compose restart api"
+	docker-compose --profile tools run --rm stripe-cli listen --forward-to http://api:8000/api/billing/webhook
+
+# One-time: log in Stripe CLI in Docker (opens browser)
+stripe-login:
+	docker-compose --profile tools run --rm stripe-cli login
+
+# =============================================================================
 # CONFIG PROXY (main feature)
 # =============================================================================
 # Test the config proxy (requires make dev or dev-bg). Uses DEFAULT_API_KEY from .env.

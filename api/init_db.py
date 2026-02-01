@@ -13,7 +13,7 @@ ADMIN_FULL_NAME = os.getenv("ADMIN_FULL_NAME", "Administrator")
 DEFAULT_API_KEY = os.getenv("DEFAULT_API_KEY", "lp_default_admin_key_change_in_production")
 
 def run_migrations(db):
-    """Add config_api_keys columns if missing; ensure usage_log exists for proxy usage tracking."""
+    """Add config_api_keys columns if missing; ensure usage_log exists; add users billing columns."""
     for col, spec in [
         ("target_url", "TEXT"),
         ("fail_rate", "INT DEFAULT 0"),
@@ -26,6 +26,18 @@ def run_migrations(db):
             db.execute(text(f"ALTER TABLE config_api_keys ADD COLUMN {col} {spec}"))
             db.commit()
             print(f"Added column {col} to config_api_keys")
+        except Exception:
+            db.rollback()
+    for col, spec in [
+        ("plan", "VARCHAR(32) NOT NULL DEFAULT 'free'"),
+        ("trial_ends_at", "DATETIME NULL"),
+        ("stripe_customer_id", "VARCHAR(255) NULL"),
+        ("stripe_subscription_id", "VARCHAR(255) NULL"),
+    ]:
+        try:
+            db.execute(text(f"ALTER TABLE users ADD COLUMN {col} {spec}"))
+            db.commit()
+            print(f"Added column {col} to users")
         except Exception:
             db.rollback()
     # Ensure usage_log exists (proxy writes here for dashboard timeline)

@@ -467,7 +467,7 @@ if os.getenv('ENVIRONMENT') == 'production':
         {/* Footer */}
         <Box sx={{ mt: 8, py: 4, textAlign: 'center', borderTop: '1px solid', borderColor: 'divider' }}>
           <Typography variant="body2" color="text.secondary">
-            Need help? <a href="/register" style={{ color: 'inherit' }}>Create an account</a> to create config keys (one key → one target URL).
+            Need help? <a href="/register" style={{ color: 'inherit' }}>Create an account</a> to create config keys.
           </Typography>
         </Box>
       </Container>

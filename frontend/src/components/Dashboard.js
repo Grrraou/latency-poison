@@ -132,7 +132,7 @@ function Dashboard() {
           </Button>
         </Box>
         <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Overview of your config keys (one key → one target URL). Usage tracking can be added later.
+          Overview of your config keys. Usage tracking can be added later.
         </Typography>
 
         {error && (

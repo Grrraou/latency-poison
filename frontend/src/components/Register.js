@@ -87,6 +87,7 @@ function Register({ setUser }) {
               onChange={handleChange}
               margin="normal"
               required
+              helperText="Letters, numbers, _ . - only (no spaces or @)"
             />
             <TextField
               fullWidth

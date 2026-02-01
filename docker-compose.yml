@@ -40,6 +40,8 @@ services:
     environment:
       - REACT_APP_API_BASE_URL=${REACT_APP_API_BASE_URL:-http://localhost:8000}
       - REACT_APP_PROXY_API_BASE_URL=${REACT_APP_PROXY_API_BASE_URL:-http://localhost:8080}
+      - REACT_APP_STRIPE_PUBLISHABLE_KEY=${REACT_APP_STRIPE_PUBLISHABLE_KEY:-localhost}
+      - REACT_APP_STRIPE_DONATION_LINK=${REACT_APP_STRIPE_DONATION_LINK:-}
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules
@@ -61,7 +63,12 @@ services:
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
       - ADMIN_FULL_NAME=${ADMIN_FULL_NAME:-Administrator}
-      - DEFAULT_API_KEY=${DEFAULT_API_KEY:-lp_default_admin_key_change_in_production}
+      - DEFAULT_API_KEY=${DEFAULT_API_KEY:-lp_default_admin_key_change-in_production}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-localhost}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - STRIPE_STARTER_PRICE_ID=${STRIPE_STARTER_PRICE_ID:-}
+      - STRIPE_PRO_PRICE_ID=${STRIPE_PRO_PRICE_ID:-}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
     volumes:
       - ./api:/app
     depends_on:
@@ -86,6 +93,15 @@ services:
       mysql:
         condition: service_healthy
 
+  # Stripe CLI for local webhook forwarding (run: make stripe-listen)
+  stripe-cli:
+    image: stripe/stripe-cli:latest
+    volumes:
+      - stripe-cli-config:/root/.config/stripe
+    profiles:
+      - tools
+
 volumes:
   frontend_node_modules:
   mysql_data:
+  stripe-cli-config:

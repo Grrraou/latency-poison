@@ -270,7 +270,7 @@ function Landing() {
             How it works
           </Typography>
           <Typography variant="body1" align="center" color="text.secondary" sx={{ mb: 6 }}>
-            Create config keys (one key → one target URL), set chaos, and call the proxy. Try Sandbox with no sign-up.
+            Create config keys, set chaos, and call the proxy. Try Sandbox with no sign-up.
           </Typography>
           <Grid container spacing={4}>
             <Grid item xs={12} md={6}>

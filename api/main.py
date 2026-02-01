@@ -6,11 +6,21 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
+from jose.exceptions import ExpiredSignatureError
 from passlib.context import CryptContext
 import os
+import re
 import secrets
 
+import stripe
 from database import get_db, User as DBUser, ConfigApiKey as DBConfigApiKey, UsageLog as DBUsageLog
+from billing import (
+    PLAN_LIMITS,
+    get_effective_plan,
+    get_requests_this_month,
+    get_keys_limit,
+    get_requests_limit,
+)
 
 # Security
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here")
@@ -59,11 +69,31 @@ class User(BaseModel):
     full_name: Optional[str] = None
     disabled: Optional[bool] = None
 
+class UserMe(BaseModel):
+    username: str
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    disabled: Optional[bool] = None
+    plan: str = "free"
+    trial_ends_at: Optional[datetime] = None
+    has_active_subscription: bool = False
+
+
 class UserCreate(BaseModel):
-    username: str = Field(..., min_length=1, max_length=255, pattern=r"^[a-zA-Z0-9_.-]+$")
+    username: str = Field(..., min_length=1, max_length=255)
     email: str = Field(..., min_length=1, max_length=255)
     password: str = Field(..., min_length=8, max_length=128)
     full_name: Optional[str] = Field(None, max_length=255)
+
+    @field_validator("username")
+    @classmethod
+    def username_format(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("Username is required")
+        if not re.match(r"^[a-zA-Z0-9_.-]+$", v):
+            raise ValueError("Username can only contain letters, numbers, and _ . - (no spaces or @)")
+        return v.lower()
 
     @field_validator("email")
     @classmethod
@@ -71,11 +101,6 @@ class UserCreate(BaseModel):
         if not v or "@" not in v or len(v) > 255:
             raise ValueError("Invalid email")
         return v.strip().lower()
-
-    @field_validator("username")
-    @classmethod
-    def username_strip(cls, v: str) -> str:
-        return v.strip() if v else v
 
 # Config API Key (one key -> one target URL + chaos)
 def _validate_http_https(url: Optional[str]) -> Optional[str]:
@@ -204,6 +229,12 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
+    except ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     except JWTError:
         raise credentials_exception
     user = get_user(db, username=username)
@@ -250,9 +281,19 @@ async def register_user(body: UserCreate, db: Session = Depends(get_db)):
     except Exception:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request")
 
-@app.get("/api/users/me", response_model=User)
-async def read_users_me(current_user: DBUser = Depends(get_current_user)):
-    return User(username=current_user.username, email=current_user.email, full_name=current_user.full_name, disabled=current_user.disabled)
+@app.get("/api/users/me", response_model=UserMe)
+async def read_users_me(db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
+    plan = get_effective_plan(current_user)
+    has_sub = bool(getattr(current_user, "stripe_subscription_id", None))
+    return UserMe(
+        username=current_user.username,
+        email=current_user.email,
+        full_name=current_user.full_name,
+        disabled=current_user.disabled,
+        plan=plan,
+        trial_ends_at=getattr(current_user, "trial_ends_at", None),
+        has_active_subscription=has_sub,
+    )
 
 @app.get("/")
 async def root():
@@ -276,6 +317,13 @@ def generate_config_api_key():
 
 @app.post("/api/config-keys/", response_model=ConfigApiKeyResponse)
 async def create_config_key(data: ConfigApiKeyCreate, db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
+    plan = get_effective_plan(current_user)
+    key_count = db.query(DBConfigApiKey).filter(DBConfigApiKey.owner_id == current_user.id).count()
+    if key_count >= get_keys_limit(plan):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Plan limit reached: {get_keys_limit(plan)} config keys. Upgrade to add more.",
+        )
     db_key = DBConfigApiKey(
         name=data.name, key=generate_config_api_key(), is_active=True,
         target_url=(data.target_url or "").strip() or None,
@@ -369,6 +417,101 @@ async def usage_summary(
     return {"total_requests": total, "by_key": by_key}
 
 
+def _format_stripe_price(price_obj) -> str:
+    """Format Stripe Price for display (e.g. '12.00 €/month')."""
+    unit_amount = getattr(price_obj, "unit_amount", None) or 0
+    amount = unit_amount / 100
+    currency = (getattr(price_obj, "currency", None) or "eur").upper()
+    symbol = "€" if currency == "EUR" else " " + currency
+    interval = "month"
+    recurring = getattr(price_obj, "recurring", None)
+    if recurring:
+        interval = getattr(recurring, "interval", None) or interval
+    return f"{amount:.2f}{symbol}/{interval}"
+
+
+# Public plans (prices fetched from Stripe by price_id)
+@app.get("/api/billing/plans")
+async def billing_plans():
+    if STRIPE_SECRET_KEY == "localhost" or not STRIPE_SECRET_KEY:
+        return {"plans": []}
+    plan_defs = [
+        ("starter", "Starter", 10, 50000, STRIPE_STARTER_PRICE_ID),
+        ("pro", "Pro", 50, 500000, STRIPE_PRO_PRICE_ID),
+    ]
+    plans = []
+    client = stripe.StripeClient(STRIPE_SECRET_KEY)
+    for plan_id, name, keys, requests_per_month, price_id in plan_defs:
+        if not price_id or not price_id.startswith("price_"):
+            continue
+        try:
+            price_obj = client.prices.retrieve(price_id)
+            price_display = _format_stripe_price(price_obj)
+            plans.append({
+                "id": plan_id,
+                "name": name,
+                "keys": keys,
+                "requests_per_month": requests_per_month,
+                "price_display": price_display,
+                "price_id": price_id,
+            })
+        except Exception:
+            continue
+    return {"plans": plans}
+
+
+# Sync plan from Stripe (call after checkout success; updates DB from Stripe subscriptions)
+@app.post("/api/billing/sync")
+async def billing_sync(db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
+    if STRIPE_SECRET_KEY == "localhost" or not STRIPE_SECRET_KEY:
+        return {"plan": get_effective_plan(current_user), "synced": False}
+    cid = getattr(current_user, "stripe_customer_id", None)
+    if not cid:
+        return {"plan": "free", "synced": True}
+    client = stripe.StripeClient(STRIPE_SECRET_KEY)
+    try:
+        for status in ("active", "trialing"):
+            subs = client.subscriptions.list(params={"customer": cid, "status": status, "limit": 1})
+            if not subs.data:
+                continue
+            sub = subs.data[0]
+            price_id = ""
+            if sub.items and sub.items.data:
+                price_id = getattr(sub.items.data[0].price, "id", None) or ""
+            plan = "pro" if price_id == STRIPE_PRO_PRICE_ID else "starter"
+            current_user.stripe_subscription_id = sub.id
+            current_user.plan = plan
+            db.commit()
+            db.refresh(current_user)
+            return {"plan": plan, "synced": True}
+        current_user.stripe_subscription_id = None
+        current_user.plan = "free"
+        db.commit()
+        db.refresh(current_user)
+    except Exception:
+        pass
+    return {"plan": get_effective_plan(current_user), "synced": True}
+
+
+# Billing usage (keys + requests this month)
+@app.get("/api/billing/usage")
+async def billing_usage(db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
+    plan = get_effective_plan(current_user)
+    keys_used = db.query(DBConfigApiKey).filter(DBConfigApiKey.owner_id == current_user.id).count()
+    keys_limit = get_keys_limit(plan)
+    requests_this_month = get_requests_this_month(db, current_user.id)
+    requests_limit = get_requests_limit(plan)
+    return {
+        "plan": plan,
+        "keys_used": keys_used,
+        "keys_limit": keys_limit,
+        "requests_this_month": requests_this_month,
+        "requests_limit": requests_limit,
+        "trial_ends_at": getattr(current_user, "trial_ends_at", None),
+        "has_active_subscription": bool(getattr(current_user, "stripe_subscription_id", None)),
+    }
+
+
 # Usage timeline (aggregated by hour/day/month)
 @app.get("/api/usage/timeline")
 async def usage_timeline(
@@ -440,3 +583,160 @@ async def usage_timeline(
         series.append({"key_id": k.id, "key_name": k.name or f"Key {k.id}", "counts": counts})
 
     return {"group_by": group_by, "period": period, "labels": labels, "series": series}
+
+
+# Stripe billing: trial (1 day), checkout, portal, webhook
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "localhost")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_STARTER_PRICE_ID = os.getenv("STRIPE_STARTER_PRICE_ID", "")
+STRIPE_PRO_PRICE_ID = os.getenv("STRIPE_PRO_PRICE_ID", "")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+
+
+@app.post("/api/billing/trial")
+async def start_trial(db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
+    plan = get_effective_plan(current_user)
+    if plan != "free":
+        raise HTTPException(status_code=400, detail="Trial only for free plan")
+    current_user.plan = "trial"
+    current_user.trial_ends_at = datetime.utcnow() + timedelta(days=1)
+    db.commit()
+    db.refresh(current_user)
+    return {"plan": "trial", "trial_ends_at": current_user.trial_ends_at}
+
+
+class CheckoutRequest(BaseModel):
+    price_id: str
+
+
+@app.post("/api/billing/checkout")
+async def create_checkout(
+    body: CheckoutRequest,
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user),
+):
+    if STRIPE_SECRET_KEY == "localhost" or not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Stripe not configured; use donation in localhost mode")
+    if (body.price_id or "").startswith("prod_"):
+        raise HTTPException(
+            status_code=400,
+            detail="Use the Price ID (starts with price_), not the Product ID (prod_). In Stripe: Product → Tarifs → click the price (e.g. 12 €/mois) → copy the Price ID.",
+        )
+    client = stripe.StripeClient(STRIPE_SECRET_KEY)
+    if getattr(current_user, "stripe_customer_id", None):
+        customer_id = current_user.stripe_customer_id
+    else:
+        customer = client.customers.create(
+            params={"email": current_user.email or "", "metadata": {"user_id": str(current_user.id)}}
+        )
+        customer_id = customer.id
+        current_user.stripe_customer_id = customer_id
+        db.commit()
+    session = client.checkout.sessions.create(
+        params={
+            "customer": customer_id,
+            "mode": "subscription",
+            "line_items": [{"price": body.price_id, "quantity": 1}],
+            "success_url": f"{FRONTEND_URL}/billing?success=1",
+            "cancel_url": f"{FRONTEND_URL}/billing?cancel=1",
+            "metadata": {"user_id": str(current_user.id)},
+        }
+    )
+    return {"url": session.url}
+
+
+class UpgradeRequest(BaseModel):
+    to_plan: str = "pro"  # only "pro" supported for now
+
+
+@app.post("/api/billing/upgrade")
+async def upgrade_subscription(
+    body: UpgradeRequest,
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user),
+):
+    """Upgrade from Starter to Pro: update Stripe subscription to Pro price, then update DB."""
+    if STRIPE_SECRET_KEY == "localhost" or not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Stripe not configured")
+    if (body.to_plan or "").lower() != "pro":
+        raise HTTPException(status_code=400, detail="Only upgrade to Pro is supported")
+    if not STRIPE_PRO_PRICE_ID:
+        raise HTTPException(status_code=503, detail="Pro price not configured")
+    sub_id = getattr(current_user, "stripe_subscription_id", None)
+    if not sub_id:
+        raise HTTPException(status_code=400, detail="No active subscription")
+    plan = get_effective_plan(current_user)
+    if plan == "pro":
+        return {"plan": "pro", "message": "Already on Pro"}
+    if plan != "starter":
+        raise HTTPException(status_code=400, detail="Upgrade only from Starter to Pro")
+    client = stripe.StripeClient(STRIPE_SECRET_KEY)
+    try:
+        items_resp = client.subscription_items.list(params={"subscription": sub_id})
+        if not items_resp.data:
+            raise HTTPException(status_code=400, detail="Subscription has no items")
+        item_id = items_resp.data[0].id
+        # Update subscription item to Pro price; always_invoice so Stripe creates and charges immediately
+        client.subscription_items.update(
+            item_id,
+            params={
+                "price": STRIPE_PRO_PRICE_ID,
+                "proration_behavior": "always_invoice",
+            },
+        )
+        current_user.plan = "pro"
+        db.commit()
+        db.refresh(current_user)
+    except stripe.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"plan": "pro"}
+
+
+@app.post("/api/billing/portal")
+async def create_portal(db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
+    if STRIPE_SECRET_KEY == "localhost" or not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Stripe not configured")
+    cid = getattr(current_user, "stripe_customer_id", None)
+    if not cid:
+        raise HTTPException(status_code=400, detail="No subscription; subscribe first")
+    client = stripe.StripeClient(STRIPE_SECRET_KEY)
+    session = client.billing_portal.sessions.create(
+        params={"customer": cid, "return_url": f"{FRONTEND_URL}/billing"}
+    )
+    return {"url": session.url}
+
+
+@app.post("/api/billing/webhook")
+async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    if not STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="Webhook secret not set")
+    client = stripe.StripeClient(STRIPE_SECRET_KEY)
+    try:
+        event = client.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if event["type"] == "customer.subscription.created" or event["type"] == "customer.subscription.updated":
+        sub = event["data"]["object"]
+        sub_id = sub["id"]
+        customer_id = sub.get("customer")
+        status = sub.get("status", "")
+        if status in ("active", "trialing"):
+            items = sub.get("items") or {}
+            data = items.get("data") or []
+            price_id = (data[0].get("price") or {}).get("id") or "" if data else ""
+            plan = "pro" if price_id == STRIPE_PRO_PRICE_ID else "starter"
+            user = db.query(DBUser).filter(DBUser.stripe_customer_id == customer_id).first()
+            if user:
+                user.stripe_subscription_id = sub_id
+                user.plan = plan
+                db.commit()
+    elif event["type"] == "customer.subscription.deleted":
+        sub = event["data"]["object"]
+        user = db.query(DBUser).filter(DBUser.stripe_subscription_id == sub["id"]).first()
+        if user:
+            user.stripe_subscription_id = None
+            user.plan = "free"
+            db.commit()
+    return {"received": True}

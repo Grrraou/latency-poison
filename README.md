@@ -40,4 +40,24 @@ Example: if your key’s target URL is `https://api.github.com` and fail rate is
 - `make stop` — Stop  
 - `make help` — List commands  
 
+## Stripe webhook (Docker)
+
+Pour que les abonnements mettent à jour le plan en base, Stripe envoie des webhooks à ton API.
+
+**En local (app dans Docker)**  
+1. Démarre le stack : `make dev` (ou `docker-compose up -d`).  
+2. Premier usage seulement : `make stripe-login` (ouvre le navigateur pour te connecter à Stripe).  
+3. Dans un autre terminal : `make stripe-listen` (relaye les webhooks vers le container API).  
+4. Copie le **Signing secret** (`whsec_...`) affiché dans ton `.env` :  
+   `STRIPE_WEBHOOK_SECRET=whsec_xxxxx`  
+5. Redémarre l’API : `docker-compose restart api`  
+
+**En production**  
+1. Stripe Dashboard → Developers → Webhooks → Add endpoint.  
+2. URL : `https://ton-api.com/api/billing/webhook`  
+3. Événements : `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`.  
+4. Récupère le **Signing secret** et mets-le dans les variables d’environnement du container (ex. `STRIPE_WEBHOOK_SECRET`).  
+
+Le container `api` lit déjà `STRIPE_WEBHOOK_SECRET` depuis le `.env` (voir `docker-compose.yml`).
+
 Do not use in production. Development and testing only.

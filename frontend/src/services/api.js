@@ -6,10 +6,15 @@ const getAuthHeader = () => {
 };
 
 const handleResponse = async (response) => {
-  const data = await response.json();
+  const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      window.dispatchEvent(new CustomEvent('auth:logout'));
+    }
     const error = new Error(data.detail || 'Request failed');
     error.response = { data };
+    error.status = response.status;
     throw error;
   }
   return data;
@@ -99,5 +104,58 @@ export const fetchUsageTimeline = async (groupBy = 'day', period = '30d') => {
 // Usage summary (total + per key, for debugging empty chart)
 export const fetchUsageSummary = async () => {
   const response = await fetch(API_ENDPOINTS.USAGE_SUMMARY, { headers: getAuthHeader() });
+  return handleResponse(response);
+};
+
+// Billing
+export const fetchBillingPlans = async () => {
+  const response = await fetch(API_ENDPOINTS.BILLING.PLANS);
+  return handleResponse(response);
+};
+
+export const fetchBillingUsage = async () => {
+  const response = await fetch(API_ENDPOINTS.BILLING.USAGE, { headers: getAuthHeader() });
+  return handleResponse(response);
+};
+
+export const syncBillingFromStripe = async () => {
+  const response = await fetch(API_ENDPOINTS.BILLING.SYNC, {
+    method: 'POST',
+    headers: getAuthHeader(),
+  });
+  return handleResponse(response);
+};
+
+export const createCheckout = async (priceId) => {
+  const response = await fetch(API_ENDPOINTS.BILLING.CHECKOUT, {
+    method: 'POST',
+    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ price_id: priceId }),
+  });
+  return handleResponse(response);
+};
+
+export const createPortal = async () => {
+  const response = await fetch(API_ENDPOINTS.BILLING.PORTAL, {
+    method: 'POST',
+    headers: getAuthHeader(),
+  });
+  return handleResponse(response);
+};
+
+export const upgradeToPro = async () => {
+  const response = await fetch(API_ENDPOINTS.BILLING.UPGRADE, {
+    method: 'POST',
+    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to_plan: 'pro' }),
+  });
+  return handleResponse(response);
+};
+
+export const startTrial = async () => {
+  const response = await fetch(API_ENDPOINTS.BILLING.TRIAL, {
+    method: 'POST',
+    headers: getAuthHeader(),
+  });
   return handleResponse(response);
 };

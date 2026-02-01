@@ -11,6 +11,7 @@ import QuickSandbox from './components/QuickSandbox';
 import Landing from './components/Landing';
 import Documentation from './components/Documentation';
 import Configs from './components/Configs';
+import Billing from './components/Billing';
 import Health from './components/Health';
 import Dashboard from './components/Dashboard';
 import { UserProvider } from './contexts/UserContext';
@@ -41,6 +42,7 @@ function AppContent({ user, setUser }) {
           <Route path="/docs" element={<Documentation />} />
           <Route path="/dashboard" element={<PrivateRoute user={user}><Dashboard /></PrivateRoute>} />
           <Route path="/configs" element={<PrivateRoute user={user}><Configs /></PrivateRoute>} />
+          <Route path="/billing" element={<PrivateRoute user={user}><Billing /></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Box>
@@ -56,6 +58,12 @@ function App() {
     const token = localStorage.getItem('token');
     if (token) setUser({ token });
     setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    const onLogout = () => setUser(null);
+    window.addEventListener('auth:logout', onLogout);
+    return () => window.removeEventListener('auth:logout', onLogout);
   }, []);
 
   if (loading) return <Box>Loading...</Box>;

@@ -2,6 +2,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignK
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
+from typing import Optional
 import os
 
 # MySQL connection URL
@@ -28,6 +29,11 @@ class User(Base):
     full_name = Column(String(255))
     hashed_password = Column(String(255))
     disabled = Column(Boolean, default=False)
+    # Billing: free | trial | starter | pro
+    plan = Column(String(32), default="free", nullable=False)
+    trial_ends_at = Column(DateTime, nullable=True)
+    stripe_customer_id = Column(String(255), nullable=True, index=True)
+    stripe_subscription_id = Column(String(255), nullable=True, index=True)
     config_api_keys = relationship("ConfigApiKey", back_populates="owner", cascade="all, delete-orphan")
 
 
