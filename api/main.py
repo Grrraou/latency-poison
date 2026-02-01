@@ -102,6 +102,34 @@ class UserCreate(BaseModel):
             raise ValueError("Invalid email")
         return v.strip().lower()
 
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = Field(None, min_length=1, max_length=255)
+    email: Optional[str] = Field(None, min_length=1, max_length=255)
+    full_name: Optional[str] = Field(None, max_length=255)
+    current_password: Optional[str] = None
+    new_password: Optional[str] = Field(None, min_length=8, max_length=128)
+
+    @field_validator("username")
+    @classmethod
+    def username_format(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return v
+        v = v.strip()
+        if not re.match(r"^[a-zA-Z0-9_.-]+$", v):
+            raise ValueError("Username can only contain letters, numbers, and _ . - (no spaces or @)")
+        return v.lower()
+
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return v
+        v = v.strip()
+        if "@" not in v or len(v) > 255:
+            raise ValueError("Invalid email")
+        return v.lower()
+
 # Config API Key (one key -> one target URL + chaos)
 def _validate_http_https(url: Optional[str]) -> Optional[str]:
     if not url or not url.strip():
@@ -294,6 +322,47 @@ async def read_users_me(db: Session = Depends(get_db), current_user: DBUser = De
         trial_ends_at=getattr(current_user, "trial_ends_at", None),
         has_active_subscription=has_sub,
     )
+
+
+@app.patch("/api/users/me", response_model=UserMe)
+async def update_users_me(
+    body: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user),
+):
+    """Update current user profile (username, email, full_name) and/or password."""
+    if body.username is not None:
+        existing = db.query(DBUser).filter(DBUser.username == body.username, DBUser.id != current_user.id).first()
+        if existing:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already taken")
+        current_user.username = body.username
+    if body.email is not None:
+        existing = db.query(DBUser).filter(DBUser.email == body.email, DBUser.id != current_user.id).first()
+        if existing:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+        current_user.email = body.email
+    if body.full_name is not None:
+        current_user.full_name = body.full_name.strip() or None
+    if body.new_password is not None:
+        if not body.current_password:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password required to set a new password")
+        if not verify_password(body.current_password, current_user.hashed_password):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+        current_user.hashed_password = pwd_context.hash(body.new_password)
+    db.commit()
+    db.refresh(current_user)
+    plan = get_effective_plan(current_user)
+    has_sub = bool(getattr(current_user, "stripe_subscription_id", None))
+    return UserMe(
+        username=current_user.username,
+        email=current_user.email,
+        full_name=current_user.full_name,
+        disabled=current_user.disabled,
+        plan=plan,
+        trial_ends_at=getattr(current_user, "trial_ends_at", None),
+        has_active_subscription=has_sub,
+    )
+
 
 @app.get("/")
 async def root():

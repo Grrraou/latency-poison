@@ -14,6 +14,7 @@ import Configs from './components/Configs';
 import Billing from './components/Billing';
 import Health from './components/Health';
 import Dashboard from './components/Dashboard';
+import Profile from './components/Profile';
 import { UserProvider } from './contexts/UserContext';
 
 const theme = createTheme({
@@ -43,6 +44,7 @@ function AppContent({ user, setUser }) {
           <Route path="/dashboard" element={<PrivateRoute user={user}><Dashboard /></PrivateRoute>} />
           <Route path="/configs" element={<PrivateRoute user={user}><Configs /></PrivateRoute>} />
           <Route path="/billing" element={<PrivateRoute user={user}><Billing /></PrivateRoute>} />
+          <Route path="/profile" element={<PrivateRoute user={user}><Profile /></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Box>

@@ -50,6 +50,9 @@ function Navbar({ user, setUser }) {
               <Button color="inherit" component={RouterLink} to="/billing">
                 Billing
               </Button>
+              <Button color="inherit" component={RouterLink} to="/profile">
+                Profile
+              </Button>
               <Button color="inherit" component={RouterLink} to="/sandbox">
                 Sandbox
               </Button>

@@ -45,6 +45,15 @@ export const getCurrentUser = async () => {
   return handleResponse(response);
 };
 
+export const updateCurrentUser = async (data) => {
+  const response = await fetch(API_ENDPOINTS.AUTH.ME, {
+    method: 'PATCH',
+    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse(response);
+};
+
 export const logout = () => {
   localStorage.removeItem('token');
 };
