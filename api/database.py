@@ -49,6 +49,7 @@ class User(Base):
     verification_token = Column(String(255), nullable=True, index=True)
     verification_token_expires = Column(DateTime, nullable=True)
     config_api_keys = relationship("ConfigApiKey", back_populates="owner", cascade="all, delete-orphan")
+    contact_requests = relationship("ContactRequest", back_populates="user", cascade="all, delete-orphan")
 
 
 class ContactRequest(Base):

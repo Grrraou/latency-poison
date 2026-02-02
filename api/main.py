@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError, IntegrityError
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime, timedelta
@@ -11,8 +12,11 @@ from passlib.context import CryptContext
 import os
 import re
 import secrets
+import logging
 
 import stripe
+
+logger = logging.getLogger(__name__)
 from database import get_db, User as DBUser, ConfigApiKey as DBConfigApiKey, UsageLog as DBUsageLog, ContactRequest as DBContactRequest
 from email_sender import send_verification_email
 from billing import (
@@ -372,19 +376,25 @@ async def register_user(body: UserCreate, db: Session = Depends(get_db)):
     try:
         email = (body.email or "").strip().lower()
         if not email or "@" not in email:
+            logger.info("Register 400: Invalid email")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email")
         existing = db.query(DBUser).filter(DBUser.email == email).first()
         if existing:
             # Only block if we're sure the account is verified (default to unverified if column missing)
             is_verified = getattr(existing, "email_verified", None)
             if is_verified is True or is_verified == 1:
+                logger.info("Register 400: Email already registered for %s", email)
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
             # Unverified account: send a new verification link and update password so they can retry
             existing.hashed_password = pwd_context.hash(body.password)
             existing.full_name = body.full_name or existing.full_name
             db.commit()
             db.refresh(existing)
-            verification_link = set_verification_and_send(db, existing, existing.email, is_new_email=False)
+            verification_link = None
+            try:
+                verification_link = set_verification_and_send(db, existing, existing.email, is_new_email=False)
+            except Exception as e:
+                logger.warning("Register: resend verification failed for %s: %s", existing.email, e)
             out = {
                 "message": "A new verification link has been sent. Please check your email to verify your account.",
                 "email": existing.email,
@@ -403,7 +413,11 @@ async def register_user(body: UserCreate, db: Session = Depends(get_db)):
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
-        verification_link = set_verification_and_send(db, db_user, db_user.email, is_new_email=False)
+        verification_link = None
+        try:
+            verification_link = set_verification_and_send(db, db_user, db_user.email, is_new_email=False)
+        except Exception as e:
+            logger.warning("Register: send verification failed for %s: %s", db_user.email, e)
         out = {
             "message": "Registration successful. Please check your email to verify your account before logging in.",
             "email": db_user.email,
@@ -413,8 +427,21 @@ async def register_user(body: UserCreate, db: Session = Depends(get_db)):
         return out
     except HTTPException:
         raise
-    except Exception:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request")
+    except OperationalError as e:
+        logger.exception("Register DB error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Database error. Ensure migrations are applied (run init-db on the server).",
+        )
+    except IntegrityError as e:
+        logger.exception("Register constraint error: %s", e)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Registration failed (duplicate or constraint).")
+    except Exception as e:
+        logger.exception("Register failed: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Registration failed. Check API logs for the exact error.",
+        )
 
 
 @app.get("/api/auth/verify-email")
