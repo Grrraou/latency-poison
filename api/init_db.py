@@ -1,4 +1,4 @@
-from database import SessionLocal, User, Base, engine, ConfigApiKey, UsageLog
+from database import SessionLocal, User, Base, engine, ConfigApiKey, UsageLog, ContactRequest
 from passlib.context import CryptContext
 from sqlalchemy import text
 import os
@@ -76,6 +76,37 @@ def run_migrations(db):
     except Exception as e:
         db.rollback()
         print("Note: usage_log creation:", e)
+    # Contact requests (user -> admin)
+    try:
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS contact_requests (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                category VARCHAR(64) NOT NULL,
+                subject VARCHAR(255) NULL,
+                message TEXT NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX (user_id),
+                INDEX (category),
+                INDEX (created_at),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """))
+        db.commit()
+        print("Ensured contact_requests table exists")
+    except Exception as e:
+        db.rollback()
+        print("Note: contact_requests creation:", e)
+    for col, spec in [
+        ("admin_reply", "TEXT NULL"),
+        ("closed_at", "DATETIME NULL"),
+    ]:
+        try:
+            db.execute(text(f"ALTER TABLE contact_requests ADD COLUMN {col} {spec}"))
+            db.commit()
+            print(f"Added column {col} to contact_requests")
+        except Exception:
+            db.rollback()
     Base.metadata.create_all(bind=engine)
     print("Migrations completed")
 

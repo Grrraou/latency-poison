@@ -80,6 +80,49 @@ export const logout = () => {
   localStorage.removeItem('token');
 };
 
+// Contact (user -> admin)
+export const submitContactRequest = async (data) => {
+  const response = await fetch(API_ENDPOINTS.CONTACT, {
+    method: 'POST',
+    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse(response);
+};
+
+export const fetchMyContactRequests = async () => {
+  const response = await fetch(API_ENDPOINTS.CONTACT_REQUESTS, { headers: getAuthHeader() });
+  return handleResponse(response);
+};
+
+export const closeContactRequest = async (requestId) => {
+  const response = await fetch(`${API_ENDPOINTS.CONTACT_REQUESTS}/${requestId}/close`, {
+    method: 'PATCH',
+    headers: getAuthHeader(),
+  });
+  return handleResponse(response);
+};
+
+export const adminUpdateContactRequest = async (requestId, data) => {
+  const response = await fetch(`${API_ENDPOINTS.ADMIN.CONTACT_REQUESTS}/${requestId}`, {
+    method: 'PATCH',
+    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse(response);
+};
+
+// Admin (user id 1 only)
+export const fetchAdminUsers = async () => {
+  const response = await fetch(API_ENDPOINTS.ADMIN.USERS, { headers: getAuthHeader() });
+  return handleResponse(response);
+};
+
+export const fetchAdminContactRequests = async () => {
+  const response = await fetch(API_ENDPOINTS.ADMIN.CONTACT_REQUESTS, { headers: getAuthHeader() });
+  return handleResponse(response);
+};
+
 // Config keys
 export const fetchConfigKeys = async () => {
   const response = await fetch(API_ENDPOINTS.CONFIG_KEYS, { headers: getAuthHeader() });

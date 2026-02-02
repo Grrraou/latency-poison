@@ -53,6 +53,14 @@ function Navbar({ user, setUser }) {
               <Button color="inherit" component={RouterLink} to="/profile">
                 Profile
               </Button>
+              <Button color="inherit" component={RouterLink} to="/contact">
+                Contact
+              </Button>
+              {user.is_admin && (
+                <Button color="inherit" component={RouterLink} to="/admin">
+                  Admin
+                </Button>
+              )}
               <Button color="inherit" component={RouterLink} to="/sandbox">
                 Sandbox
               </Button>

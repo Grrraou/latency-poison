@@ -13,7 +13,7 @@ import re
 import secrets
 
 import stripe
-from database import get_db, User as DBUser, ConfigApiKey as DBConfigApiKey, UsageLog as DBUsageLog
+from database import get_db, User as DBUser, ConfigApiKey as DBConfigApiKey, UsageLog as DBUsageLog, ContactRequest as DBContactRequest
 from email_sender import send_verification_email
 from billing import (
     PLAN_LIMITS,
@@ -92,6 +92,7 @@ class UserMe(BaseModel):
     billing_city: Optional[str] = None
     billing_country: Optional[str] = None
     verification_link: Optional[str] = None  # Set when SMTP not configured (dev) so UI can show link
+    is_admin: bool = False  # True for user id 1
 
 
 class UserCreate(BaseModel):
@@ -456,6 +457,15 @@ async def resend_verification(body: ResendVerificationRequest, db: Session = Dep
     return out
 
 
+ADMIN_USER_ID = 1
+
+async def get_current_admin(current_user: DBUser = Depends(get_current_user)):
+    """Require current user to be admin (user id 1)."""
+    if current_user.id != ADMIN_USER_ID:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    return current_user
+
+
 @app.get("/api/users/me", response_model=UserMe)
 async def read_users_me(db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
     plan = get_effective_plan(current_user)
@@ -478,6 +488,7 @@ async def read_users_me(db: Session = Depends(get_db), current_user: DBUser = De
         billing_postal_code=getattr(current_user, "billing_postal_code", None),
         billing_city=getattr(current_user, "billing_city", None),
         billing_country=getattr(current_user, "billing_country", None),
+        is_admin=(current_user.id == ADMIN_USER_ID),
     )
 
 
@@ -579,8 +590,169 @@ async def update_users_me(
         billing_city=getattr(current_user, "billing_city", None),
         billing_country=getattr(current_user, "billing_country", None),
         verification_link=dev_verification_link,
+        is_admin=(current_user.id == ADMIN_USER_ID),
     )
 
+
+# Contact (user -> admin) and Admin (user id 1 only)
+class ContactRequestCreate(BaseModel):
+    category: str = Field(..., min_length=1, max_length=64)
+    subject: Optional[str] = Field(None, max_length=255)
+    message: str = Field(..., min_length=1, max_length=10000)
+
+    @field_validator("category")
+    @classmethod
+    def category_enum(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v not in ("support", "invoicing", "billing", "other"):
+            raise ValueError("category must be one of: support, invoicing, billing, other")
+        return v
+
+
+@app.post("/api/contact")
+async def create_contact_request(
+    body: ContactRequestCreate,
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user),
+):
+    """Submit a contact/support request to admin. All authenticated users."""
+    req = DBContactRequest(
+        user_id=current_user.id,
+        category=body.category.strip().lower(),
+        subject=(body.subject or "").strip() or None,
+        message=body.message.strip(),
+    )
+    db.add(req)
+    db.commit()
+    return {"message": "Request sent. We will get back to you.", "id": req.id}
+
+
+@app.get("/api/contact-requests")
+async def list_my_contact_requests(
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user),
+):
+    """List current user's contact requests (with admin reply and closed_at)."""
+    requests = (
+        db.query(DBContactRequest)
+        .filter(DBContactRequest.user_id == current_user.id)
+        .order_by(DBContactRequest.created_at.desc())
+        .all()
+    )
+    return {
+        "requests": [
+            {
+                "id": r.id,
+                "category": r.category,
+                "subject": r.subject,
+                "message": r.message,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "admin_reply": r.admin_reply,
+                "closed_at": r.closed_at.isoformat() if r.closed_at else None,
+            }
+            for r in requests
+        ]
+    }
+
+
+@app.patch("/api/contact-requests/{request_id}/close")
+async def close_my_contact_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user),
+):
+    """Close own contact request. User can only close their own."""
+    req = db.query(DBContactRequest).filter(
+        DBContactRequest.id == request_id,
+        DBContactRequest.user_id == current_user.id,
+    ).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if req.closed_at:
+        return {"message": "Request already closed."}
+    req.closed_at = datetime.utcnow()
+    db.commit()
+    return {"message": "Request closed."}
+
+
+class AdminContactRequestUpdate(BaseModel):
+    admin_reply: Optional[str] = Field(None, max_length=10000)
+    close: Optional[bool] = None
+
+
+@app.patch("/api/admin/contact-requests/{request_id}")
+async def admin_update_contact_request(
+    request_id: int,
+    body: AdminContactRequestUpdate,
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_admin),
+):
+    """Admin: reply to and/or close a contact request."""
+    req = db.query(DBContactRequest).filter(DBContactRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if body.admin_reply is not None:
+        req.admin_reply = (body.admin_reply or "").strip() or None
+    if body.close is True:
+        req.closed_at = req.closed_at or datetime.utcnow()
+    db.commit()
+    db.refresh(req)
+    return {
+        "id": req.id,
+        "admin_reply": req.admin_reply,
+        "closed_at": req.closed_at.isoformat() if req.closed_at else None,
+    }
+
+
+@app.get("/api/admin/users")
+async def admin_list_users(
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_admin),
+):
+    """List all accounts (admin only, user id 1)."""
+    users = db.query(DBUser).order_by(DBUser.id).all()
+    return {
+        "users": [
+            {
+                "id": u.id,
+                "email": u.email,
+                "username": u.username,
+                "plan": get_effective_plan(u),
+                "email_verified": getattr(u, "email_verified", True),
+                "disabled": u.disabled,
+                "created_at": getattr(u, "created_at", None),
+            }
+            for u in users
+        ]
+    }
+
+
+@app.get("/api/admin/contact-requests")
+async def admin_list_contact_requests(
+    db: Session = Depends(get_db),
+    current_user: DBUser = Depends(get_current_admin),
+):
+    """List all contact requests (admin only)."""
+    requests = (
+        db.query(DBContactRequest)
+        .order_by(DBContactRequest.created_at.desc())
+        .all()
+    )
+    out = []
+    for r in requests:
+        owner = db.query(DBUser).filter(DBUser.id == r.user_id).first()
+        out.append({
+            "id": r.id,
+            "user_id": r.user_id,
+            "user_email": owner.email if owner else None,
+            "category": r.category,
+            "subject": r.subject,
+            "message": r.message,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "admin_reply": r.admin_reply,
+            "closed_at": r.closed_at.isoformat() if r.closed_at else None,
+        })
+    return {"requests": out}
 
 
 @app.get("/")

@@ -12,7 +12,7 @@ import {
   Collapse,
 } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
-import { login, resendVerification } from '../services/api';
+import { login, resendVerification, getCurrentUser } from '../services/api';
 
 function Login({ setUser }) {
   const [formData, setFormData] = useState({
@@ -39,11 +39,14 @@ function Login({ setUser }) {
     setEmailNotVerified(false);
     try {
       const data = await login(formData.email, formData.password);
-      const user = {
-        email: formData.email,
-        token: data.access_token
-      };
       localStorage.setItem('token', data.access_token);
+      const user = { email: formData.email, token: data.access_token };
+      try {
+        const me = await getCurrentUser();
+        user.is_admin = me.is_admin === true;
+      } catch (_) {
+        user.is_admin = false;
+      }
       setUser(user);
       navigate('/configs');
     } catch (err) {

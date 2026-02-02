@@ -51,6 +51,21 @@ class User(Base):
     config_api_keys = relationship("ConfigApiKey", back_populates="owner", cascade="all, delete-orphan")
 
 
+class ContactRequest(Base):
+    """User support/contact requests (admin views these, can reply and close)."""
+    __tablename__ = "contact_requests"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    category = Column(String(64), nullable=False, index=True)  # support, invoicing, other
+    subject = Column(String(255), nullable=True)
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    admin_reply = Column(Text, nullable=True)
+    closed_at = Column(DateTime, nullable=True)
+    user = relationship("User", back_populates="contact_requests")
+
+
 class ConfigApiKey(Base):
     """One API key -> one target URL + chaos options. Call https://proxy:port/{key} to forward to target_url."""
     __tablename__ = "config_api_keys"

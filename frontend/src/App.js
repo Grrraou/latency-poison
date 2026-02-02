@@ -16,7 +16,10 @@ import Health from './components/Health';
 import Dashboard from './components/Dashboard';
 import Profile from './components/Profile';
 import VerifyEmail from './components/VerifyEmail';
+import Contact from './components/Contact';
+import Admin from './components/Admin';
 import { UserProvider } from './contexts/UserContext';
+import { getCurrentUser } from './services/api';
 
 const theme = createTheme({
   palette: {
@@ -28,6 +31,12 @@ const theme = createTheme({
 
 function PrivateRoute({ user, children }) {
   return user ? children : <Navigate to="/login" />;
+}
+
+function AdminRoute({ user, children }) {
+  if (!user) return <Navigate to="/login" />;
+  if (!user.is_admin) return <Navigate to="/" />;
+  return children;
 }
 
 function AppContent({ user, setUser }) {
@@ -47,6 +56,8 @@ function AppContent({ user, setUser }) {
           <Route path="/configs" element={<PrivateRoute user={user}><Configs /></PrivateRoute>} />
           <Route path="/billing" element={<PrivateRoute user={user}><Billing /></PrivateRoute>} />
           <Route path="/profile" element={<PrivateRoute user={user}><Profile /></PrivateRoute>} />
+          <Route path="/contact" element={<PrivateRoute user={user}><Contact /></PrivateRoute>} />
+          <Route path="/admin" element={<AdminRoute user={user}><Admin /></AdminRoute>} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Box>
@@ -60,8 +71,15 @@ function App() {
 
   useEffect(() => {
     const token = localStorage.getItem('token');
-    if (token) setUser({ token });
-    setLoading(false);
+    if (token) {
+      setUser({ token });
+      getCurrentUser()
+        .then((me) => setUser((u) => (u ? { ...u, email: me.email, is_admin: me.is_admin === true } : u)))
+        .catch(() => setUser((u) => (u ? { ...u, is_admin: false } : u)))
+        .finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

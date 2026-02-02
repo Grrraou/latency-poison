@@ -31,4 +31,10 @@ export const API_ENDPOINTS = {
     TRIAL: `${API_BASE_URL}/api/billing/trial`,
     UPGRADE: `${API_BASE_URL}/api/billing/upgrade`,
   },
+  CONTACT: `${API_BASE_URL}/api/contact`,
+  CONTACT_REQUESTS: `${API_BASE_URL}/api/contact-requests`,
+  ADMIN: {
+    USERS: `${API_BASE_URL}/api/admin/users`,
+    CONTACT_REQUESTS: `${API_BASE_URL}/api/admin/contact-requests`,
+  },
 };
