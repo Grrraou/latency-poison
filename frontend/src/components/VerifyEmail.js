@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Container, Paper, Typography, Button, Box, Alert, CircularProgress } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
@@ -9,6 +9,7 @@ function VerifyEmail() {
   const token = searchParams.get('token');
   const [status, setStatus] = useState('loading');
   const [message, setMessage] = useState('');
+  const successRef = useRef(false);
 
   useEffect(() => {
     if (!token) {
@@ -21,13 +22,20 @@ function VerifyEmail() {
       try {
         const data = await verifyEmail(token);
         if (!cancelled) {
+          successRef.current = true;
           setStatus('success');
           setMessage(data.message || 'Email verified. You can now log in.');
         }
       } catch (err) {
-        if (!cancelled) {
+        if (!cancelled && !successRef.current) {
+          const detail = err.response?.data?.detail || err.message || '';
+          const isInvalidOrExpired = typeof detail === 'string' && (detail.includes('Invalid') || detail.includes('expired'));
           setStatus('error');
-          setMessage(err.response?.data?.detail || err.message || 'Invalid or expired verification link.');
+          setMessage(
+            isInvalidOrExpired
+              ? 'This link is invalid, expired, or was already used. If you already verified your email, try logging in.'
+              : detail || 'Verification failed.'
+          );
         }
       }
     })();
