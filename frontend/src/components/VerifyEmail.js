@@ -5,9 +5,6 @@ import { Link as RouterLink } from 'react-router-dom';
 import { verifyEmail, getCurrentUser } from '../services/api';
 import { useUser } from '../contexts/UserContext';
 
-// Avoid sending the same token twice (e.g. React Strict Mode or two tabs)
-const requestedTokens = new Set();
-
 function VerifyEmail() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -24,12 +21,6 @@ function VerifyEmail() {
       setMessage('Missing verification link.');
       return;
     }
-    if (requestedTokens.has(token)) {
-      setStatus('already_used');
-      setMessage('This link was already used or has expired. Your email is verified — try logging in.');
-      return;
-    }
-    requestedTokens.add(token);
     let cancelled = false;
     (async () => {
       try {
@@ -95,9 +86,9 @@ function VerifyEmail() {
           {(status === 'error' || status === 'already_used') && (
             <>
               <Alert severity={status === 'already_used' ? 'info' : 'error'} sx={{ my: 2 }}>{message}</Alert>
-              <Typography sx={{ mt: 2 }}>
-                <RouterLink to="/login" style={{ fontWeight: 500 }}>Go to login</RouterLink>
-              </Typography>
+              <Button component={RouterLink} to="/login" variant="contained" sx={{ mt: 2 }}>
+                Log in
+              </Button>
             </>
           )}
         </Paper>
