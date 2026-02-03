@@ -459,7 +459,16 @@ async def verify_email(token: str, db: Session = Depends(get_db)):
         user.username = user.pending_email
         user.pending_email = None
     db.commit()
-    return {"message": "Email verified. You can now log in.", "verified": True}
+    access_token = create_access_token(
+        data={"sub": user.email},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    return {
+        "message": "Email verified. You are now logged in.",
+        "verified": True,
+        "access_token": access_token,
+        "token_type": "bearer",
+    }
 
 
 class ResendVerificationRequest(BaseModel):

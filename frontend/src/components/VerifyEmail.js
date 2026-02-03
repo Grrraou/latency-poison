@@ -1,17 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Container, Paper, Typography, Button, Box, Alert, CircularProgress } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
-import { verifyEmail } from '../services/api';
+import { verifyEmail, getCurrentUser } from '../services/api';
+import { useUser } from '../contexts/UserContext';
 
 // Avoid sending the same token twice (e.g. React Strict Mode or two tabs)
 const requestedTokens = new Set();
 
 function VerifyEmail() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { setUser } = useUser();
   const token = searchParams.get('token');
   const [status, setStatus] = useState('loading');
   const [message, setMessage] = useState('');
+  const [hasToken, setHasToken] = useState(false);
   const successRef = useRef(false);
 
   useEffect(() => {
@@ -21,6 +25,8 @@ function VerifyEmail() {
       return;
     }
     if (requestedTokens.has(token)) {
+      setStatus('already_used');
+      setMessage('This link was already used or has expired. Your email is verified — try logging in.');
       return;
     }
     requestedTokens.add(token);
@@ -28,10 +34,24 @@ function VerifyEmail() {
     (async () => {
       try {
         const data = await verifyEmail(token);
-        if (!cancelled) {
-          successRef.current = true;
-          setStatus('success');
-          setMessage(data.message || 'Email verified. You can now log in.');
+        if (cancelled) return;
+        successRef.current = true;
+        setStatus('success');
+        setMessage(data.message || 'Email verified.');
+
+        if (data.access_token) {
+          setHasToken(true);
+          localStorage.setItem('token', data.access_token);
+          const user = { token: data.access_token, email: '' };
+          try {
+            const me = await getCurrentUser();
+            user.email = me.email ?? user.email;
+            user.is_admin = me.is_admin === true;
+          } catch (_) {
+            user.is_admin = false;
+          }
+          setUser(user);
+          navigate('/configs', { replace: true });
         }
       } catch (err) {
         if (!cancelled && !successRef.current) {
@@ -47,7 +67,7 @@ function VerifyEmail() {
       }
     })();
     return () => { cancelled = true; };
-  }, [token]);
+  }, [token, setUser, navigate]);
 
   return (
     <Container maxWidth="sm">
@@ -65,13 +85,19 @@ function VerifyEmail() {
           {status === 'success' && (
             <>
               <Alert severity="success" sx={{ my: 2 }}>{message}</Alert>
-              <Button component={RouterLink} to="/login" variant="contained">Go to login</Button>
+              {hasToken ? (
+                <Typography color="text.secondary" sx={{ mt: 1 }}>Taking you to the app…</Typography>
+              ) : (
+                <Button component={RouterLink} to="/login" variant="contained" sx={{ mt: 2 }}>Go to login</Button>
+              )}
             </>
           )}
           {(status === 'error' || status === 'already_used') && (
             <>
               <Alert severity={status === 'already_used' ? 'info' : 'error'} sx={{ my: 2 }}>{message}</Alert>
-              <Button component={RouterLink} to="/login" variant="contained">Go to login</Button>
+              <Typography sx={{ mt: 2 }}>
+                <RouterLink to="/login" style={{ fontWeight: 500 }}>Go to login</RouterLink>
+              </Typography>
             </>
           )}
         </Paper>
