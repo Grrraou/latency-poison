@@ -1,6 +1,8 @@
 # Latency Poison
 
-A chaos proxy for testing API latency and failures. **One config key → one target URL.** Call the proxy with your API key in the path; it forwards to that URL with chaos applied.
+A chaos proxy for testing API latency and failures. One config key → one target URL. Call the proxy with your API key in the path; it forwards to that URL with configurable latency and fail rate.
+
+**Try it:** https://latencypoison.rootsolve.org/
 
 ## Quick start
 
