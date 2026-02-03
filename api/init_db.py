@@ -128,7 +128,7 @@ def init_db():
             db.add(admin_user)
             db.commit()
             db.refresh(admin_user)
-            print("Admin user created:", ADMIN_USERNAME, "/", ADMIN_PASSWORD)
+            print("Admin user created:", ADMIN_EMAIL, "/", ADMIN_PASSWORD)
         # Ensure default config key for admin
         if not db.query(ConfigApiKey).filter(ConfigApiKey.owner_id == admin_user.id).first():
             ck = ConfigApiKey(

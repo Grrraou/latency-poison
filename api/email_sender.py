@@ -1,11 +1,19 @@
 """
 Send verification emails. Configure SMTP via env or log link in dev.
-Env: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM (e.g. "Latency Poison <noreply@example.com>")
+Env: SMTP_HOST, SMTP_PORT (587=STARTTLS, 465=SMTPS), SMTP_USER, SMTP_PASSWORD, SMTP_FROM, SMTP_TIMEOUT (optional)
 """
 import os
+import re
+import ssl
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+
+
+def _envelope_from(display_from: str) -> str:
+    """Extract envelope sender (addr-spec). OVH and some servers require plain email."""
+    m = re.search(r"<([^>]+)>", display_from)
+    return m.group(1).strip().lower() if m else display_from.strip().lower()
 
 def send_verification_email(to_email: str, verify_url: str, is_new_email: bool = False):
     """Send verification email. Returns verify_url when SMTP not configured (dev), None when sent or on failure."""
@@ -35,11 +43,24 @@ This link expires in 24 hours. If you didn't request this, you can ignore this e
         port = int(os.getenv("SMTP_PORT", "587"))
         user = os.getenv("SMTP_USER", "").strip()
         password = os.getenv("SMTP_PASSWORD", "")
-        with smtplib.SMTP(smtp_host, port) as server:
-            if user and password:
-                server.starttls()
-                server.login(user, password)
-            server.sendmail(smtp_from, to_email, msg.as_string())
+        timeout = int(os.getenv("SMTP_TIMEOUT", "25"))
+        # Port 465 = SMTPS (implicit TLS); use SMTP_SSL with explicit context. Port 587 = STARTTLS.
+        if port == 465:
+            context = ssl.create_default_context()
+            # Some providers (e.g. OVH) use a cert with different CN; allow skipping hostname check.
+            if os.getenv("SMTP_SSL_NO_VERIFY_HOST", "").strip().lower() in ("1", "true", "yes"):
+                context.check_hostname = False
+            with smtplib.SMTP_SSL(smtp_host, port, timeout=timeout, context=context) as server:
+                server.ehlo()
+                if user and password:
+                    server.login(user, password)
+                server.sendmail(_envelope_from(smtp_from), to_email, msg.as_string())
+        else:
+            with smtplib.SMTP(smtp_host, port, timeout=timeout) as server:
+                if user and password:
+                    server.starttls()
+                    server.login(user, password)
+                server.sendmail(_envelope_from(smtp_from), to_email, msg.as_string())
         return None
     except Exception as e:
         print(f"[EMAIL] Failed to send to {to_email}: {e}")
