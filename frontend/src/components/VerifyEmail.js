@@ -25,7 +25,6 @@ function VerifyEmail() {
     (async () => {
       try {
         const data = await verifyEmail(token);
-        if (cancelled) return;
         successRef.current = true;
         setStatus('success');
         setMessage(data.message || 'Email verified.');
@@ -45,7 +44,7 @@ function VerifyEmail() {
           navigate('/configs', { replace: true });
         }
       } catch (err) {
-        if (!cancelled && !successRef.current) {
+        if (!successRef.current) {
           const detail = err.response?.data?.detail || err.message || '';
           const isInvalidOrExpired = typeof detail === 'string' && (detail.includes('Invalid') || detail.includes('expired') || detail.includes('already used'));
           setStatus(isInvalidOrExpired ? 'already_used' : 'error');
