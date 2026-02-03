@@ -7,7 +7,6 @@ import re
 import ssl
 import smtplib
 from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
 
 def _envelope_from(display_from: str) -> str:
@@ -34,12 +33,12 @@ This link expires in 24 hours. If you didn't request this, you can ignore this e
         # Dev: log link and return it so API can include in response
         print(f"[EMAIL] Verification link for {to_email}: {verify_url}")
         return verify_url
+    print(f"[EMAIL] Sending verification to {to_email}")
     try:
-        msg = MIMEMultipart("alternative")
+        msg = MIMEText(body, "plain")
         msg["Subject"] = subject
         msg["From"] = smtp_from
         msg["To"] = to_email
-        msg.attach(MIMEText(body, "plain"))
         port = int(os.getenv("SMTP_PORT", "587"))
         user = os.getenv("SMTP_USER", "").strip()
         password = os.getenv("SMTP_PASSWORD", "")
@@ -54,13 +53,13 @@ This link expires in 24 hours. If you didn't request this, you can ignore this e
                 server.ehlo()
                 if user and password:
                     server.login(user, password)
-                refused = server.sendmail(_envelope_from(smtp_from), to_email, msg.as_string())
+                refused = server.sendmail(_envelope_from(smtp_from), [to_email], msg.as_string())
         else:
             with smtplib.SMTP(smtp_host, port, timeout=timeout) as server:
                 if user and password:
                     server.starttls()
                     server.login(user, password)
-                refused = server.sendmail(_envelope_from(smtp_from), to_email, msg.as_string())
+                refused = server.sendmail(_envelope_from(smtp_from), [to_email], msg.as_string())
         if refused:
             print(f"[EMAIL] Server refused recipient {to_email}: {refused}")
             return None
