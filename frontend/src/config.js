@@ -13,7 +13,7 @@ export const API_ENDPOINTS = {
     RESEND_VERIFICATION: `${API_BASE_URL}/api/auth/resend-verification`,
   },
   USER_RESEND_VERIFICATION: `${API_BASE_URL}/api/users/me/resend-verification`,
-  CONFIG_KEYS: `${API_BASE_URL}/api/config-keys`,
+  CONFIG_KEYS: `${API_BASE_URL}/api/config-keys/`,
   SANDBOX: `${PROXY_API_BASE_URL}/sandbox`,
   HEALTH: {
     API: `${API_BASE_URL}/api/health`,

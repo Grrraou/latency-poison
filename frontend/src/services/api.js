@@ -139,7 +139,7 @@ export const createConfigKey = async (data) => {
 };
 
 export const updateConfigKey = async (keyId, data) => {
-  const response = await fetch(`${API_ENDPOINTS.CONFIG_KEYS}/${keyId}/`, {
+  const response = await fetch(`${API_ENDPOINTS.CONFIG_KEYS}${keyId}/`, {
     method: 'PUT',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -148,7 +148,7 @@ export const updateConfigKey = async (keyId, data) => {
 };
 
 export const deleteConfigKey = async (keyId) => {
-  const response = await fetch(`${API_ENDPOINTS.CONFIG_KEYS}/${keyId}/`, {
+  const response = await fetch(`${API_ENDPOINTS.CONFIG_KEYS}${keyId}/`, {
     method: 'DELETE',
     headers: getAuthHeader(),
   });
