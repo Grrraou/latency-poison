@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 PLAN_LIMITS = {
-    "free": {"config_keys": 2, "requests_per_month": 5000},
+    "free": {"config_keys": 2, "requests_per_month": 500},
     "trial": {"config_keys": 10, "requests_per_month": 50000},
     "starter": {"config_keys": 10, "requests_per_month": 50000},
     "pro": {"config_keys": 50, "requests_per_month": 500000},

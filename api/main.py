@@ -1309,6 +1309,12 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 user.stripe_subscription_id = sub_id
                 user.plan = plan
                 db.commit()
+        elif status == "paused":
+            user = db.query(DBUser).filter(DBUser.stripe_subscription_id == sub_id).first()
+            if user:
+                user.stripe_subscription_id = None
+                user.plan = "free"
+                db.commit()
     elif event["type"] == "customer.subscription.deleted":
         sub = event["data"]["object"]
         user = db.query(DBUser).filter(DBUser.stripe_subscription_id == sub["id"]).first()
