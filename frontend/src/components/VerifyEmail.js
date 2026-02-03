@@ -4,6 +4,9 @@ import { Container, Paper, Typography, Button, Box, Alert, CircularProgress } fr
 import { Link as RouterLink } from 'react-router-dom';
 import { verifyEmail } from '../services/api';
 
+// Avoid sending the same token twice (e.g. React Strict Mode or two tabs)
+const requestedTokens = new Set();
+
 function VerifyEmail() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
@@ -17,6 +20,10 @@ function VerifyEmail() {
       setMessage('Missing verification link.');
       return;
     }
+    if (requestedTokens.has(token)) {
+      return;
+    }
+    requestedTokens.add(token);
     let cancelled = false;
     (async () => {
       try {
@@ -29,11 +36,11 @@ function VerifyEmail() {
       } catch (err) {
         if (!cancelled && !successRef.current) {
           const detail = err.response?.data?.detail || err.message || '';
-          const isInvalidOrExpired = typeof detail === 'string' && (detail.includes('Invalid') || detail.includes('expired'));
-          setStatus('error');
+          const isInvalidOrExpired = typeof detail === 'string' && (detail.includes('Invalid') || detail.includes('expired') || detail.includes('already used'));
+          setStatus(isInvalidOrExpired ? 'already_used' : 'error');
           setMessage(
             isInvalidOrExpired
-              ? 'This link is invalid, expired, or was already used. If you already verified your email, try logging in.'
+              ? 'This link was already used or has expired. Your email is verified — try logging in.'
               : detail || 'Verification failed.'
           );
         }
@@ -61,10 +68,10 @@ function VerifyEmail() {
               <Button component={RouterLink} to="/login" variant="contained">Go to login</Button>
             </>
           )}
-          {status === 'error' && (
+          {(status === 'error' || status === 'already_used') && (
             <>
-              <Alert severity="error" sx={{ my: 2 }}>{message}</Alert>
-              <Button component={RouterLink} to="/login" variant="outlined">Go to login</Button>
+              <Alert severity={status === 'already_used' ? 'info' : 'error'} sx={{ my: 2 }}>{message}</Alert>
+              <Button component={RouterLink} to="/login" variant="contained">Go to login</Button>
             </>
           )}
         </Paper>

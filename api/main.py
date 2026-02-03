@@ -13,6 +13,7 @@ import os
 import re
 import secrets
 import logging
+from urllib.parse import quote
 
 import stripe
 
@@ -305,7 +306,7 @@ def set_verification_and_send(db: Session, user: DBUser, email_to: str, is_new_e
     user.verification_token = token
     user.verification_token_expires = datetime.utcnow() + timedelta(hours=VERIFICATION_TOKEN_EXPIRE_HOURS)
     db.commit()
-    verify_url = f"{FRONTEND_URL}/verify-email?token={token}"
+    verify_url = f"{FRONTEND_URL}/verify-email?token={quote(token)}"
     return send_verification_email(email_to, verify_url, is_new_email=is_new_email)
 
 def authenticate_user(db: Session, email: str, password: str):
