@@ -54,13 +54,17 @@ This link expires in 24 hours. If you didn't request this, you can ignore this e
                 server.ehlo()
                 if user and password:
                     server.login(user, password)
-                server.sendmail(_envelope_from(smtp_from), to_email, msg.as_string())
+                refused = server.sendmail(_envelope_from(smtp_from), to_email, msg.as_string())
         else:
             with smtplib.SMTP(smtp_host, port, timeout=timeout) as server:
                 if user and password:
                     server.starttls()
                     server.login(user, password)
-                server.sendmail(_envelope_from(smtp_from), to_email, msg.as_string())
+                refused = server.sendmail(_envelope_from(smtp_from), to_email, msg.as_string())
+        if refused:
+            print(f"[EMAIL] Server refused recipient {to_email}: {refused}")
+            return None
+        print(f"[EMAIL] Sent verification to {to_email}")
         return None
     except Exception as e:
         print(f"[EMAIL] Failed to send to {to_email}: {e}")
