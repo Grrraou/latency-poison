@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -44,6 +45,18 @@ func main() {
 	// Connection: close so reverse proxies (e.g. Apache) don't get "Error reading from remote server"
 	app.Use(func(c *fiber.Ctx) error {
 		c.Set("Connection", "close")
+		return c.Next()
+	})
+
+	// Normalize path: collapse // to / (Apache with ProxyPass /proxy can send //health)
+	app.Use(func(c *fiber.Ctx) error {
+		path := c.Path()
+		if strings.Contains(path, "//") {
+			for strings.Contains(path, "//") {
+				path = strings.ReplaceAll(path, "//", "/")
+			}
+			c.Request().URI().SetPath(path)
+		}
 		return c.Next()
 	})
 
