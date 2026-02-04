@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import {
   AppBar,
@@ -6,13 +6,25 @@ import {
   Typography,
   Button,
   Box,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
 } from '@mui/material';
 
 function Navbar({ user, setUser }) {
-  const handleLogout = () => {
+  const [logoutOpen, setLogoutOpen] = useState(false);
+
+  const handleLogoutClick = () => setLogoutOpen(true);
+
+  const handleLogoutConfirm = () => {
+    setLogoutOpen(false);
     localStorage.removeItem('token');
     setUser(null);
   };
+
+  const handleLogoutCancel = () => setLogoutOpen(false);
 
   return (
     <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
@@ -70,9 +82,21 @@ function Navbar({ user, setUser }) {
               <Button color="inherit" component={RouterLink} to="/docs">
                 Docs
               </Button>
-              <Button color="inherit" onClick={handleLogout}>
+              <Button color="inherit" onClick={handleLogoutClick}>
                 Logout
               </Button>
+              <Dialog open={logoutOpen} onClose={handleLogoutCancel}>
+                <DialogTitle>Log out?</DialogTitle>
+                <DialogContent>
+                  <DialogContentText>Are you sure you want to log out?</DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                  <Button onClick={handleLogoutCancel}>Cancel</Button>
+                  <Button onClick={handleLogoutConfirm} color="primary" variant="contained" autoFocus>
+                    Log out
+                  </Button>
+                </DialogActions>
+              </Dialog>
             </>
           ) : (
             <>
