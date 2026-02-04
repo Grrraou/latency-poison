@@ -41,6 +41,12 @@ func main() {
 		AppName: "Latency Simulation Proxy",
 	})
 
+	// Connection: close so reverse proxies (e.g. Apache) don't get "Error reading from remote server"
+	app.Use(func(c *fiber.Ctx) error {
+		c.Set("Connection", "close")
+		return c.Next()
+	})
+
 	// Add CORS middleware
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
